@@ -252,7 +252,7 @@ class CivitasAgent:
     def _request(self, method: str, path: str, body: Any = None) -> ApiResponse:
         """Make an HTTP request to the CivitasOS API."""
         self._ensure_auth()
-        url = f"{self.base_url}/api/v1{path}"
+        url = f"{self.base_url}{self.api_prefix}{path}"
         data = json.dumps(body).encode("utf-8") if body else None
         req = Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/json")
@@ -1161,3 +1161,18 @@ class CivitasAgent:
     def market_stats(self) -> Dict[str, Any]:
         """Get marketplace statistics."""
         return self._request("GET", "/multi/market/stats")
+
+    # ─── BL: API version negotiation ─────────────────────────────────
+
+    def set_api_version(self, version: str = "v1") -> None:
+        """Switch API version prefix (v1 or v2).
+
+        Args:
+            version: API version string, e.g. "v1" or "v2"
+        """
+        self._api_version = version
+
+    @property
+    def api_prefix(self) -> str:
+        """Current API path prefix."""
+        return f"/api/{getattr(self, '_api_version', 'v1')}"

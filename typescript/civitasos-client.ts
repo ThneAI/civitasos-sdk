@@ -45,10 +45,16 @@ export class CivitasOS {
         this.token = undefined;
     }
 
+    /** BL: Set the API version prefix (default "v1"). */
+    private apiVersion = "v1";
+    setApiVersion(version: "v1" | "v2") {
+        this.apiVersion = version;
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private url(path: string): string {
-        return `${this.baseUrl}/api/v1${path}`;
+        return `${this.baseUrl}/api/${this.apiVersion}${path}`;
     }
 
     private async request<T = unknown>(
