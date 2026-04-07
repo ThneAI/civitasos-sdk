@@ -116,6 +116,38 @@ export class CivitasOS {
         return this.get("/agents");
     }
 
+    /**
+     * One-call agent registration with minimal parameters.
+     *
+     * @param id       Unique agent identifier
+     * @param name     Human-readable name
+     * @param endpoint URL where this agent accepts A2A messages
+     * @param opts.description  Optional description
+     * @param opts.credentials  Bootstrap credentials for initial reputation boost:
+     *   - `{ type: "identity_verified" }`
+     *   - `{ type: "stake", amount: 500 }`
+     *   - `{ type: "referral", voucher_id: "trusted-agent-1" }`
+     *   - `{ type: "capability", capability_id: "data-analysis" }`
+     * @returns Agent card, bootstrap result, and next steps guide
+     */
+    quickstart(
+        id: string,
+        name: string,
+        endpoint: string,
+        opts?: {
+            description?: string;
+            credentials?: Array<Record<string, unknown>>;
+        }
+    ) {
+        return this.post("/a2a/quickstart", {
+            id,
+            name,
+            endpoint,
+            description: opts?.description,
+            credentials: opts?.credentials,
+        });
+    }
+
     registerAgent(
         id: string,
         name: string,

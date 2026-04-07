@@ -641,6 +641,44 @@ class CivitasAgent:
 
     # ─── Agent Card Registry ─────────────────────────────────────────
 
+    def a2a_quickstart(
+        self,
+        agent_id: str,
+        name: str,
+        endpoint: str,
+        description: str = "",
+        credentials: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """One-call agent registration with minimal parameters.
+
+        Args:
+            agent_id: Unique agent identifier
+            name: Human-readable name
+            endpoint: URL where this agent accepts A2A messages
+            description: Optional description (auto-generated if omitted)
+            credentials: Optional bootstrap credentials for higher initial reputation.
+                Each credential is a dict with "type" and type-specific fields:
+                - {"type": "identity_verified"}
+                - {"type": "stake", "amount": 500}
+                - {"type": "referral", "voucher_id": "trusted-agent-1"}
+                - {"type": "capability", "capability_id": "data-analysis"}
+
+        Returns:
+            Dict with agent card, bootstrap result, and next steps guide
+        """
+        payload: Dict[str, Any] = {
+            "id": agent_id,
+            "name": name,
+            "endpoint": endpoint,
+        }
+        if description:
+            payload["description"] = description
+        if credentials:
+            payload["credentials"] = credentials
+        result = self._a2a_request("POST", "/quickstart", payload)
+        self._agent_id = agent_id
+        return result
+
     def a2a_register(
         self,
         agent_id: str,

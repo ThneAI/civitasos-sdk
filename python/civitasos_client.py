@@ -91,6 +91,30 @@ class CivitasOS:
         """GET /api/v1/agents"""
         return self._get("/agents")
 
+    def quickstart(
+        self,
+        agent_id: str,
+        name: str,
+        endpoint: str,
+        description: str = "",
+        credentials: Optional[List[Dict[str, Any]]] = None,
+    ) -> dict:
+        """POST /api/v1/a2a/quickstart — minimal one-call registration.
+
+        Args:
+            agent_id: Unique agent identifier
+            name: Human-readable name
+            endpoint: URL where the agent accepts A2A messages
+            description: Optional agent description
+            credentials: Optional bootstrap credentials for initial rep boost
+        """
+        payload: Dict[str, Any] = {"id": agent_id, "name": name, "endpoint": endpoint}
+        if description:
+            payload["description"] = description
+        if credentials:
+            payload["credentials"] = credentials
+        return self._post("/a2a/quickstart", payload)
+
     def register_agent(
         self,
         agent_id: str,

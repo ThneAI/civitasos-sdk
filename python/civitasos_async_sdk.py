@@ -156,6 +156,21 @@ class AsyncCivitasAgent:
 
     # ─── A2A ─────────────────────────────────────────────────────
 
+    async def a2a_quickstart(
+        self, agent_id: str, name: str, endpoint: str,
+        description: str = "",
+        credentials: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """One-call agent registration with minimal parameters and optional bootstrap."""
+        payload: Dict[str, Any] = {"id": agent_id, "name": name, "endpoint": endpoint}
+        if description:
+            payload["description"] = description
+        if credentials:
+            payload["credentials"] = credentials
+        result = await self._a2a_request("POST", "/quickstart", payload)
+        self._agent_id = agent_id
+        return result
+
     async def a2a_register(
         self, agent_id: str, name: str, description: str,
         capabilities: List[Dict[str, Any]], endpoint: str = "",
