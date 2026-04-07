@@ -137,6 +137,7 @@ export class CivitasOS {
         opts?: {
             description?: string;
             credentials?: Array<Record<string, unknown>>;
+            publicKey?: string;
         }
     ) {
         return this.post("/a2a/quickstart", {
@@ -145,6 +146,7 @@ export class CivitasOS {
             endpoint,
             description: opts?.description,
             credentials: opts?.credentials,
+            public_key: opts?.publicKey,
         });
     }
 

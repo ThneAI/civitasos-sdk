@@ -98,6 +98,7 @@ class CivitasOS:
         endpoint: str,
         description: str = "",
         credentials: Optional[List[Dict[str, Any]]] = None,
+        public_key: Optional[str] = None,
     ) -> dict:
         """POST /api/v1/a2a/quickstart — minimal one-call registration.
 
@@ -107,12 +108,15 @@ class CivitasOS:
             endpoint: URL where the agent accepts A2A messages
             description: Optional agent description
             credentials: Optional bootstrap credentials for initial rep boost
+            public_key: Optional hex-encoded Ed25519 public key for auth enrollment
         """
         payload: Dict[str, Any] = {"id": agent_id, "name": name, "endpoint": endpoint}
         if description:
             payload["description"] = description
         if credentials:
             payload["credentials"] = credentials
+        if public_key:
+            payload["public_key"] = public_key
         return self._post("/a2a/quickstart", payload)
 
     def register_agent(

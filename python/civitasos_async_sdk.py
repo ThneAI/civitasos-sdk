@@ -160,6 +160,7 @@ class AsyncCivitasAgent:
         self, agent_id: str, name: str, endpoint: str,
         description: str = "",
         credentials: Optional[List[Dict[str, Any]]] = None,
+        public_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """One-call agent registration with minimal parameters and optional bootstrap."""
         payload: Dict[str, Any] = {"id": agent_id, "name": name, "endpoint": endpoint}
@@ -167,6 +168,8 @@ class AsyncCivitasAgent:
             payload["description"] = description
         if credentials:
             payload["credentials"] = credentials
+        if public_key:
+            payload["public_key"] = public_key
         result = await self._a2a_request("POST", "/quickstart", payload)
         self._agent_id = agent_id
         return result

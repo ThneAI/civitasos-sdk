@@ -648,6 +648,7 @@ class CivitasAgent:
         endpoint: str,
         description: str = "",
         credentials: Optional[List[Dict[str, Any]]] = None,
+        public_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """One-call agent registration with minimal parameters.
 
@@ -662,6 +663,10 @@ class CivitasAgent:
                 - {"type": "stake", "amount": 500}
                 - {"type": "referral", "voucher_id": "trusted-agent-1"}
                 - {"type": "capability", "capability_id": "data-analysis"}
+            public_key: Optional hex-encoded Ed25519 public key (64 hex chars).
+                When provided, the key is enrolled so the agent can authenticate
+                via /api/v1/auth/token immediately. If omitted and the SDK has a
+                generated identity, it is sent automatically.
 
         Returns:
             Dict with agent card, bootstrap result, and next steps guide
@@ -675,6 +680,9 @@ class CivitasAgent:
             payload["description"] = description
         if credentials:
             payload["credentials"] = credentials
+        pk = public_key or self._public_key_hex
+        if pk:
+            payload["public_key"] = pk
         result = self._a2a_request("POST", "/quickstart", payload)
         self._agent_id = agent_id
         return result
