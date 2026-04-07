@@ -1214,6 +1214,186 @@ class CivitasAgent:
         """Get marketplace statistics."""
         return self._request("GET", "/multi/market/stats")
 
+    # ─── R2R: Relation-aware Runtime Protocol ────────────────────────
+
+    def r2r_propose_relation(
+        self,
+        from_agent: str,
+        to_agent: str,
+        relation_type: str = "cooperative",
+    ) -> Dict[str, Any]:
+        """Propose a new R2R relation between two agents.
+
+        Args:
+            from_agent: Initiating agent ID
+            to_agent: Target agent ID
+            relation_type: cooperative, competitive, supervisory, adversarial, delegated
+        """
+        return self._request("POST", "/r2r/relations", {
+            "from": from_agent,
+            "to": to_agent,
+            "relation_type": relation_type,
+        })
+
+    def r2r_terminate_relation(
+        self,
+        from_agent: str,
+        to_agent: str,
+        reason: str = "requested",
+    ) -> Dict[str, Any]:
+        """Terminate an existing R2R relation.
+
+        Args:
+            from_agent: Agent initiating termination
+            to_agent: Other agent in the relation
+            reason: Reason for termination
+        """
+        return self._request("POST", "/r2r/relations/terminate", {
+            "from": from_agent,
+            "to": to_agent,
+            "reason": reason,
+        })
+
+    def r2r_revive_relation(
+        self,
+        agent_a: str,
+        agent_b: str,
+    ) -> Dict[str, Any]:
+        """Revive a dormant R2R relation.
+
+        Args:
+            agent_a: First agent ID
+            agent_b: Second agent ID
+        """
+        return self._request("PUT", "/r2r/relations/revive", {
+            "agent_a": agent_a,
+            "agent_b": agent_b,
+        })
+
+    def r2r_send_signal(
+        self,
+        from_agent: str,
+        to_agent: str,
+        intent: str = "heartbeat",
+        payload: Optional[Dict[str, Any]] = None,
+        correlation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send an R2R signal through relation routing.
+
+        Args:
+            from_agent: Sender agent ID
+            to_agent: Receiver agent ID
+            intent: Signal intent (heartbeat, broadcast, etc.)
+            payload: Signal payload data
+            correlation_id: Optional correlation ID for request-response pairing
+        """
+        body: Dict[str, Any] = {
+            "from": from_agent,
+            "to": to_agent,
+            "intent": intent,
+            "payload": payload or {},
+        }
+        if correlation_id:
+            body["correlation_id"] = correlation_id
+        return self._request("POST", "/r2r/signals", body)
+
+    def r2r_send_task(
+        self,
+        from_agent: str,
+        to_agent: str,
+        capability_id: str,
+        task_input: Optional[Dict[str, Any]] = None,
+        deadline_secs: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Dispatch a task via R2R relation routing.
+
+        Args:
+            from_agent: Task requester agent ID
+            to_agent: Task executor agent ID
+            capability_id: Required capability
+            task_input: Task input data
+            deadline_secs: Optional deadline in seconds
+        """
+        body: Dict[str, Any] = {
+            "from": from_agent,
+            "to": to_agent,
+            "capability_id": capability_id,
+            "input": task_input or {},
+        }
+        if deadline_secs is not None:
+            body["deadline_secs"] = deadline_secs
+        return self._request("POST", "/r2r/tasks", body)
+
+    def r2r_report_completion(
+        self,
+        task_id: str,
+        success: bool = True,
+    ) -> Dict[str, Any]:
+        """Report task completion to update aspect metrics.
+
+        Args:
+            task_id: The task ID returned from r2r_send_task
+            success: Whether the task completed successfully
+        """
+        return self._request("POST", "/r2r/tasks/complete", {
+            "task_id": task_id,
+            "success": success,
+        })
+
+    def r2r_rate_peer(
+        self,
+        rater: str,
+        rated: str,
+        dimension: str = "quality",
+        score: float = 0.8,
+    ) -> Dict[str, Any]:
+        """Submit a peer rating.
+
+        Args:
+            rater: Agent submitting the rating
+            rated: Agent being rated
+            dimension: reliability, quality, responsiveness, honesty
+            score: Rating score between 0.0 and 1.0
+        """
+        return self._request("POST", "/r2r/rate", {
+            "rater": rater,
+            "rated": rated,
+            "dimension": dimension,
+            "score": score,
+        })
+
+    def r2r_social_graph(self, agent_id: str) -> Dict[str, Any]:
+        """Get agent's social graph (relations, essence, aspect, stats).
+
+        Args:
+            agent_id: The agent to query
+        """
+        return self._request("GET", f"/r2r/social-graph/{agent_id}")
+
+    def r2r_aspect_gap(self, agent_id: str) -> Dict[str, Any]:
+        """Get aspect gap report (self-view vs social-view divergence).
+
+        Args:
+            agent_id: The agent to analyze
+        """
+        return self._request("GET", f"/r2r/aspect-gap/{agent_id}")
+
+    def r2r_detect_adversarial(self, agent_id: str) -> Dict[str, Any]:
+        """Detect adversarial behavior for an agent.
+
+        Args:
+            agent_id: The agent to check
+        """
+        return self._request("GET", f"/r2r/adversarial/{agent_id}")
+
+    def r2r_maintenance(self) -> Dict[str, Any]:
+        """Run R2R maintenance cycle (temperature decay, aspect gap, adversarial detection)."""
+        return self._request("POST", "/r2r/maintenance")
+
+    def r2r_stats(self) -> Dict[str, Any]:
+        """Get R2R runtime statistics (agents, relations, tracked tasks)."""
+        return self._request("GET", "/r2r/stats")
+
     # ─── BL: API version negotiation ─────────────────────────────────
 
     def set_api_version(self, version: str = "v1") -> None:

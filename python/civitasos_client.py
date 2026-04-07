@@ -454,3 +454,56 @@ class CivitasOS:
     def market_stats(self) -> dict:
         """GET /api/v1/multi/market/stats"""
         return self._get("/multi/market/stats")
+
+    # ── R2R: Relation-aware Runtime Protocol ─────────────────────────────
+
+    def r2r_propose_relation(self, from_agent: str, to_agent: str, relation_type: str = "cooperative") -> dict:
+        """POST /api/v1/r2r/relations"""
+        return self._post("/r2r/relations", {"from": from_agent, "to": to_agent, "relation_type": relation_type})
+
+    def r2r_terminate_relation(self, from_agent: str, to_agent: str, reason: str = "requested") -> dict:
+        """POST /api/v1/r2r/relations/terminate"""
+        return self._post("/r2r/relations/terminate", {"from": from_agent, "to": to_agent, "reason": reason})
+
+    def r2r_revive_relation(self, agent_a: str, agent_b: str) -> dict:
+        """PUT /api/v1/r2r/relations/revive"""
+        return self._put("/r2r/relations/revive", {"agent_a": agent_a, "agent_b": agent_b})
+
+    def r2r_send_signal(self, from_agent: str, to_agent: str, intent: str = "heartbeat", payload: Optional[dict] = None) -> dict:
+        """POST /api/v1/r2r/signals"""
+        return self._post("/r2r/signals", {"from": from_agent, "to": to_agent, "intent": intent, "payload": payload or {}})
+
+    def r2r_send_task(self, from_agent: str, to_agent: str, capability_id: str, task_input: Optional[dict] = None, deadline_secs: Optional[int] = None) -> dict:
+        """POST /api/v1/r2r/tasks"""
+        body: dict = {"from": from_agent, "to": to_agent, "capability_id": capability_id, "input": task_input or {}}
+        if deadline_secs is not None:
+            body["deadline_secs"] = deadline_secs
+        return self._post("/r2r/tasks", body)
+
+    def r2r_report_completion(self, task_id: str, success: bool = True) -> dict:
+        """POST /api/v1/r2r/tasks/complete"""
+        return self._post("/r2r/tasks/complete", {"task_id": task_id, "success": success})
+
+    def r2r_rate_peer(self, rater: str, rated: str, dimension: str = "quality", score: float = 0.8) -> dict:
+        """POST /api/v1/r2r/rate"""
+        return self._post("/r2r/rate", {"rater": rater, "rated": rated, "dimension": dimension, "score": score})
+
+    def r2r_social_graph(self, agent_id: str) -> dict:
+        """GET /api/v1/r2r/social-graph/:agent_id"""
+        return self._get(f"/r2r/social-graph/{agent_id}")
+
+    def r2r_aspect_gap(self, agent_id: str) -> dict:
+        """GET /api/v1/r2r/aspect-gap/:agent_id"""
+        return self._get(f"/r2r/aspect-gap/{agent_id}")
+
+    def r2r_detect_adversarial(self, agent_id: str) -> dict:
+        """GET /api/v1/r2r/adversarial/:agent_id"""
+        return self._get(f"/r2r/adversarial/{agent_id}")
+
+    def r2r_maintenance(self) -> dict:
+        """POST /api/v1/r2r/maintenance"""
+        return self._post("/r2r/maintenance")
+
+    def r2r_stats(self) -> dict:
+        """GET /api/v1/r2r/stats"""
+        return self._get("/r2r/stats")

@@ -539,4 +539,93 @@ export class CivitasOS {
             input: { agent_a: agentA, agent_b: agentB },
         });
     }
+
+    // ── R2R: Relation-aware Runtime Protocol ────────────────────────────
+
+    /** Propose a new R2R relation between two agents. */
+    r2rProposeRelation(
+        from: string,
+        to: string,
+        relationType: "cooperative" | "competitive" | "supervisory" | "adversarial" | "delegated" = "cooperative",
+    ) {
+        return this.post("/r2r/relations", { from, to, relation_type: relationType });
+    }
+
+    /** Terminate an existing R2R relation. */
+    r2rTerminateRelation(from: string, to: string, reason = "requested") {
+        return this.post("/r2r/relations/terminate", { from, to, reason });
+    }
+
+    /** Revive a dormant R2R relation. */
+    r2rReviveRelation(agentA: string, agentB: string) {
+        return this.put("/r2r/relations/revive", { agent_a: agentA, agent_b: agentB });
+    }
+
+    /** Send an R2R signal through relation routing. */
+    r2rSendSignal(
+        from: string,
+        to: string,
+        intent = "heartbeat",
+        payload: Record<string, unknown> = {},
+        correlationId?: string,
+    ) {
+        const body: Record<string, unknown> = { from, to, intent, payload };
+        if (correlationId) body.correlation_id = correlationId;
+        return this.post("/r2r/signals", body);
+    }
+
+    /** Dispatch a task via R2R relation routing. */
+    r2rSendTask(
+        from: string,
+        to: string,
+        capabilityId: string,
+        input: Record<string, unknown> = {},
+        deadlineSecs?: number,
+    ) {
+        const body: Record<string, unknown> = {
+            from, to, capability_id: capabilityId, input,
+        };
+        if (deadlineSecs !== undefined) body.deadline_secs = deadlineSecs;
+        return this.post("/r2r/tasks", body);
+    }
+
+    /** Report task completion to update aspect metrics. */
+    r2rReportCompletion(taskId: string, success = true) {
+        return this.post("/r2r/tasks/complete", { task_id: taskId, success });
+    }
+
+    /** Submit a peer rating. */
+    r2rRatePeer(
+        rater: string,
+        rated: string,
+        dimension: "reliability" | "quality" | "responsiveness" | "honesty" = "quality",
+        score = 0.8,
+    ) {
+        return this.post("/r2r/rate", { rater, rated, dimension, score });
+    }
+
+    /** Get agent's social graph (relations, essence, aspect, stats). */
+    r2rSocialGraph(agentId: string) {
+        return this.get(`/r2r/social-graph/${agentId}`);
+    }
+
+    /** Get aspect gap report (self-view vs social-view divergence). */
+    r2rAspectGap(agentId: string) {
+        return this.get(`/r2r/aspect-gap/${agentId}`);
+    }
+
+    /** Detect adversarial behavior for an agent. */
+    r2rDetectAdversarial(agentId: string) {
+        return this.get(`/r2r/adversarial/${agentId}`);
+    }
+
+    /** Run R2R maintenance cycle. */
+    r2rMaintenance() {
+        return this.post("/r2r/maintenance");
+    }
+
+    /** Get R2R runtime statistics. */
+    r2rStats() {
+        return this.get("/r2r/stats");
+    }
 }

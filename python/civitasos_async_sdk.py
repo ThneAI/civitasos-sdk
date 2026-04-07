@@ -297,6 +297,102 @@ class AsyncCivitasAgent:
     async def economics_metrics(self) -> Dict[str, Any]:
         return await self._a2a_request("GET", "/economics/metrics")
 
+    # ─── R2R: Relation-aware Runtime Protocol ────────────────────
+
+    async def r2r_propose_relation(
+        self, from_agent: str, to_agent: str, relation_type: str = "cooperative",
+    ) -> Dict[str, Any]:
+        """Propose a new R2R relation between two agents."""
+        resp = await self._request("POST", "/r2r/relations", {
+            "from": from_agent, "to": to_agent, "relation_type": relation_type,
+        })
+        return resp.data
+
+    async def r2r_terminate_relation(
+        self, from_agent: str, to_agent: str, reason: str = "requested",
+    ) -> Dict[str, Any]:
+        """Terminate an existing R2R relation."""
+        resp = await self._request("POST", "/r2r/relations/terminate", {
+            "from": from_agent, "to": to_agent, "reason": reason,
+        })
+        return resp.data
+
+    async def r2r_revive_relation(self, agent_a: str, agent_b: str) -> Dict[str, Any]:
+        """Revive a dormant R2R relation."""
+        resp = await self._request("PUT", "/r2r/relations/revive", {
+            "agent_a": agent_a, "agent_b": agent_b,
+        })
+        return resp.data
+
+    async def r2r_send_signal(
+        self, from_agent: str, to_agent: str, intent: str = "heartbeat",
+        payload: Optional[Dict[str, Any]] = None, correlation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send an R2R signal through relation routing."""
+        body: Dict[str, Any] = {
+            "from": from_agent, "to": to_agent,
+            "intent": intent, "payload": payload or {},
+        }
+        if correlation_id:
+            body["correlation_id"] = correlation_id
+        resp = await self._request("POST", "/r2r/signals", body)
+        return resp.data
+
+    async def r2r_send_task(
+        self, from_agent: str, to_agent: str, capability_id: str,
+        task_input: Optional[Dict[str, Any]] = None, deadline_secs: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Dispatch a task via R2R relation routing."""
+        body: Dict[str, Any] = {
+            "from": from_agent, "to": to_agent,
+            "capability_id": capability_id, "input": task_input or {},
+        }
+        if deadline_secs is not None:
+            body["deadline_secs"] = deadline_secs
+        resp = await self._request("POST", "/r2r/tasks", body)
+        return resp.data
+
+    async def r2r_report_completion(self, task_id: str, success: bool = True) -> Dict[str, Any]:
+        """Report task completion to update aspect metrics."""
+        resp = await self._request("POST", "/r2r/tasks/complete", {
+            "task_id": task_id, "success": success,
+        })
+        return resp.data
+
+    async def r2r_rate_peer(
+        self, rater: str, rated: str, dimension: str = "quality", score: float = 0.8,
+    ) -> Dict[str, Any]:
+        """Submit a peer rating."""
+        resp = await self._request("POST", "/r2r/rate", {
+            "rater": rater, "rated": rated, "dimension": dimension, "score": score,
+        })
+        return resp.data
+
+    async def r2r_social_graph(self, agent_id: str) -> Dict[str, Any]:
+        """Get agent's social graph."""
+        resp = await self._request("GET", f"/r2r/social-graph/{agent_id}")
+        return resp.data
+
+    async def r2r_aspect_gap(self, agent_id: str) -> Dict[str, Any]:
+        """Get aspect gap report."""
+        resp = await self._request("GET", f"/r2r/aspect-gap/{agent_id}")
+        return resp.data
+
+    async def r2r_detect_adversarial(self, agent_id: str) -> Dict[str, Any]:
+        """Detect adversarial behavior for an agent."""
+        resp = await self._request("GET", f"/r2r/adversarial/{agent_id}")
+        return resp.data
+
+    async def r2r_maintenance(self) -> Dict[str, Any]:
+        """Run R2R maintenance cycle."""
+        resp = await self._request("POST", "/r2r/maintenance")
+        return resp.data
+
+    async def r2r_stats(self) -> Dict[str, Any]:
+        """Get R2R runtime statistics."""
+        resp = await self._request("GET", "/r2r/stats")
+        return resp.data
+
     async def close(self):
         if self._session:
             await self._session.close()
