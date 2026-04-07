@@ -1,0 +1,33 @@
+{
+    "name": "civitasos-sdk",
+    "version": "1.0.0-rc.1",
+    "description": "TypeScript SDK for CivitasOS — the self-evolving AI society",
+    "main": "dist/civitasos-client.js",
+    "types": "dist/civitasos-client.d.ts",
+    "files": [
+        "dist/"
+    ],
+    "scripts": {
+        "build": "tsc",
+        "prepublishOnly": "npm run build"
+    },
+    "keywords": [
+        "civitasos",
+        "agent",
+        "a2a",
+        "multi-agent",
+        "ai-society"
+    ],
+    "author": "ThneAI <thneonl@outlook.com>",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ThneAI/civitasos-sdk"
+    },
+    "engines": {
+        "node": ">=18"
+    },
+    "devDependencies": {
+        "typescript": "^5.4.0"
+    }
+}

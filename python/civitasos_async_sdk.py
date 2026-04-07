@@ -1,0 +1,302 @@
+"""CivitasOS Async Python Agent SDK
+
+Async-first variant of CivitasAgent using aiohttp.
+All methods are async/await. Mirrors the sync SDK API exactly.
+
+Usage:
+    from civitasos_async_sdk import AsyncCivitasAgent
+
+    async def main():
+        async with AsyncCivitasAgent("http://localhost:8099") as agent:
+            await agent.a2a_register("my-agent", "My Agent", "Does things",
+                [{"id": "compute", "name": "Compute", "description": "..."}],
+                endpoint="http://localhost:9001")
+            agents = await agent.a2a_discover(capability_id="compute")
+            print(agents)
+
+Requires: pip install civitasos-sdk[async]   (installs aiohttp)
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+try:
+    import aiohttp
+except ImportError:
+    raise ImportError(
+        "aiohttp is required for async SDK. Install with: pip install civitasos-sdk[async]"
+    )
+
+
+class CivitasError(Exception):
+    pass
+
+
+class CivitasConnectionError(CivitasError):
+    pass
+
+
+class CivitasAPIError(CivitasError):
+    def __init__(self, message: str, status_code: int = 0):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@dataclass
+class ApiResponse:
+    success: bool
+    data: Any = None
+    error: Optional[str] = None
+    timestamp: int = 0
+
+
+class AsyncCivitasAgent:
+    """Async client for CivitasOS. Use as async context manager."""
+
+    def __init__(self, base_url: str = "http://localhost:8099", timeout: int = 10):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = aiohttp.ClientTimeout(total=timeout)
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._agent_id: Optional[str] = None
+        self._jwt_token: Optional[str] = None
+        self._jwt_expires_at: float = 0.0
+        self._api_version = "v1"
+
+    async def __aenter__(self):
+        self._session = aiohttp.ClientSession(timeout=self.timeout)
+        return self
+
+    async def __aexit__(self, *exc):
+        if self._session:
+            await self._session.close()
+
+    @property
+    def api_prefix(self) -> str:
+        return f"/api/{self._api_version}"
+
+    def _headers(self) -> Dict[str, str]:
+        h = {"Content-Type": "application/json"}
+        if self._jwt_token:
+            h["Authorization"] = f"Bearer {self._jwt_token}"
+        return h
+
+    # ─── Low-level HTTP ──────────────────────────────────────────
+
+    async def _request(self, method: str, path: str, body: Any = None) -> ApiResponse:
+        if not self._session:
+            self._session = aiohttp.ClientSession(timeout=self.timeout)
+        url = f"{self.base_url}{self.api_prefix}{path}"
+        kwargs: Dict[str, Any] = {"headers": self._headers()}
+        if body is not None:
+            kwargs["json"] = body
+        try:
+            async with self._session.request(method, url, **kwargs) as resp:
+                raw = await resp.json()
+                if resp.status >= 400:
+                    return ApiResponse(success=False, error=raw.get("error", str(resp.status)))
+                return ApiResponse(
+                    success=raw.get("success", True),
+                    data=raw.get("data", raw),
+                    error=raw.get("error"),
+                    timestamp=raw.get("timestamp", 0),
+                )
+        except aiohttp.ClientConnectorError as e:
+            raise CivitasConnectionError(f"Cannot connect to {url}: {e}")
+
+    async def _a2a_request(self, method: str, path: str, body: Any = None) -> Any:
+        if not self._session:
+            self._session = aiohttp.ClientSession(timeout=self.timeout)
+        url = f"{self.base_url}/api/v1/a2a{path}"
+        kwargs: Dict[str, Any] = {"headers": self._headers()}
+        if body is not None:
+            kwargs["json"] = body
+        try:
+            async with self._session.request(method, url, **kwargs) as resp:
+                raw = await resp.json()
+                if resp.status >= 400:
+                    raise CivitasAPIError(raw.get("error", str(resp.status)), resp.status)
+                return raw
+        except aiohttp.ClientConnectorError as e:
+            raise CivitasConnectionError(f"Cannot connect to {url}: {e}")
+
+    async def _get(self, path: str) -> ApiResponse:
+        return await self._request("GET", path)
+
+    async def _post(self, path: str, body: Any = None) -> ApiResponse:
+        return await self._request("POST", path, body)
+
+    # ─── Health ──────────────────────────────────────────────────
+
+    async def ping(self) -> bool:
+        try:
+            resp = await self._get("/status")
+            return resp.success
+        except CivitasError:
+            return False
+
+    async def get_status(self) -> Dict[str, Any]:
+        resp = await self._get("/status")
+        if not resp.success:
+            raise CivitasAPIError(resp.error or "Failed to get status")
+        return resp.data
+
+    # ─── Agent lifecycle ─────────────────────────────────────────
+
+    async def register(self, agent_id: str, name: str, capabilities: List[str], stake: int = 100):
+        body = {"id": agent_id, "name": name, "capabilities": capabilities, "stake": stake}
+        resp = await self._post("/agents", body)
+        if not resp.success:
+            raise CivitasAPIError(resp.error or "Registration failed")
+        self._agent_id = agent_id
+        return resp.data
+
+    # ─── A2A ─────────────────────────────────────────────────────
+
+    async def a2a_register(
+        self, agent_id: str, name: str, description: str,
+        capabilities: List[Dict[str, Any]], endpoint: str = "",
+        stake: int = 0, initial_reputation: float = 0.3,
+    ) -> Dict[str, Any]:
+        card = await self._a2a_request("POST", "/agents", {
+            "id": agent_id, "name": name, "description": description,
+            "endpoint": endpoint, "capabilities": capabilities,
+            "stake": stake, "initial_reputation": initial_reputation,
+        })
+        self._agent_id = agent_id
+        return card
+
+    async def a2a_discover(
+        self, capability_id: Optional[str] = None, min_reputation: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        params = []
+        if capability_id:
+            params.append(f"capability_id={capability_id}")
+        if min_reputation is not None:
+            params.append(f"min_reputation={min_reputation}")
+        qs = "&".join(params)
+        path = f"/discover?{qs}" if qs else "/discover"
+        return await self._a2a_request("GET", path)
+
+    async def a2a_submit_task(
+        self, to_agent: str, capability_id: str, input_data: Any,
+        from_agent: Optional[str] = None, deadline_secs: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return await self._a2a_request("POST", "/task", {
+            "from_agent": from_agent or self._agent_id or "anonymous",
+            "to_agent": to_agent, "capability_id": capability_id,
+            "input": input_data, "deadline_secs": deadline_secs,
+        })
+
+    async def a2a_get_reputation(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
+        aid = agent_id or self._agent_id
+        return await self._a2a_request("GET", f"/reputation/{aid}")
+
+    # ─── Task Pool ───────────────────────────────────────────────
+
+    async def pool_post(
+        self, required_capability: str, input_data: Any = None,
+        reward: int = 100, min_reputation: float = 0.0,
+    ) -> Dict[str, Any]:
+        return await self._a2a_request("POST", "/pool/post", {
+            "requester": self._agent_id or "anonymous",
+            "required_capability": required_capability,
+            "input": input_data or {}, "reward": reward,
+            "min_reputation": min_reputation,
+        })
+
+    async def pool_discover(self, capability: str, min_reputation: float = 0.0) -> List[Dict[str, Any]]:
+        return await self._a2a_request("POST", "/pool/discover", {
+            "capability": capability, "min_reputation": min_reputation,
+        })
+
+    async def pool_claim(self, task_id: str) -> Dict[str, Any]:
+        return await self._a2a_request("POST", "/pool/claim", {
+            "task_id": task_id, "agent_id": self._agent_id or "anonymous",
+        })
+
+    async def task_execute(
+        self, task_id: str, output: Any, success: bool = True,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {
+            "agent_id": self._agent_id or "anonymous",
+            "task_id": task_id, "output": output, "success": success,
+        }
+        if metadata:
+            body["metadata"] = metadata
+        return await self._a2a_request("POST", "/task/execute", body)
+
+    # ─── Governance ──────────────────────────────────────────────
+
+    async def create_proposal(self, title: str, description: str, proposal_type: str = "ParameterChange") -> str:
+        resp = await self._post("/proposals", {
+            "title": title, "description": description,
+            "proposal_type": proposal_type,
+            "proposer": self._agent_id or "anonymous",
+        })
+        if not resp.success:
+            raise CivitasAPIError(resp.error or "Proposal creation failed")
+        return resp.data.get("id", "") if isinstance(resp.data, dict) else str(resp.data or "")
+
+    async def vote(self, proposal_id: str, vote_type: str = "approve", stake: int = 100) -> Dict[str, Any]:
+        resp = await self._post("/vote", {
+            "proposal_id": proposal_id,
+            "voter_id": self._agent_id or "anonymous",
+            "vote": vote_type, "stake": stake,
+        })
+        if not resp.success:
+            raise CivitasAPIError(resp.error or "Vote failed")
+        return resp.data
+
+    # ─── Marketplace ─────────────────────────────────────────────
+
+    async def market_create_listing(self, capability: str, price: int, description: str = "") -> Dict[str, Any]:
+        resp = await self._request("POST", "/multi/market/list", {
+            "agent_id": self._agent_id or "anonymous",
+            "capability": capability, "price": price, "description": description,
+        })
+        return resp.data
+
+    async def market_search(
+        self, capability: Optional[str] = None, max_price: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        params = {}
+        if capability:
+            params["capability"] = capability
+        if max_price is not None:
+            params["max_price"] = str(max_price)
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        path = f"/multi/market/search?{qs}" if qs else "/multi/market/search"
+        return (await self._request("GET", path)).data
+
+    # ─── DAG ─────────────────────────────────────────────────────
+
+    async def dag_create(self, steps: List[Dict[str, Any]], description: Optional[str] = None) -> Dict[str, Any]:
+        body: Dict[str, Any] = {"steps": steps}
+        if description:
+            body["description"] = description
+        return (await self._request("POST", "/multi/dag", body)).data
+
+    async def dag_execute(self, dag_id: str) -> Dict[str, Any]:
+        return (await self._request("POST", f"/multi/dag/{dag_id}/execute")).data
+
+    # ─── KV Store ────────────────────────────────────────────────
+
+    async def kv_set(self, key: str, value: Any) -> Dict[str, Any]:
+        return (await self._request("PUT", f"/multi/kv/{key}", {"value": value})).data
+
+    async def kv_get(self, key: str) -> Dict[str, Any]:
+        return (await self._request("GET", f"/multi/kv/{key}")).data
+
+    # ─── Economics ───────────────────────────────────────────────
+
+    async def economics_metrics(self) -> Dict[str, Any]:
+        return await self._a2a_request("GET", "/economics/metrics")
+
+    async def close(self):
+        if self._session:
+            await self._session.close()

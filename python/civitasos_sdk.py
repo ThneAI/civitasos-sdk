@@ -94,6 +94,23 @@ class CivitasError(Exception):
     pass
 
 
+# ─── System Agent IDs (鸡蛋同时存在: always available on any node) ────
+SYSTEM_AGENTS = {
+    "@guardian": "Constitutional Guardian — axiom validation, violation adjudication",
+    "@reputation": "Reputation Oracle — trust queries, trust proofs, reputation history",
+    "@marketplace": "Task Marketplace — post tasks, discover tasks, auto-matching",
+    "@settler": "Settlement Coordinator — cross-chain settlement, chain negotiation",
+    "@governor": "Governance Coordinator — proposals, voting, parameter changes",
+    "@auditor": "System Auditor — audit trails, anomaly detection, compliance",
+    "@oracle": "Data Oracle — chain state, timestamps, external data feeds",
+}
+
+
+def is_system_agent(agent_id: str) -> bool:
+    """Check if an agent ID belongs to a CivitasOS system agent."""
+    return agent_id in SYSTEM_AGENTS
+
+
 class CivitasConnectionError(CivitasError):
     """Raised when the CivitasOS node is unreachable."""
     pass
@@ -308,6 +325,41 @@ class CivitasAgent:
         if not resp.success:
             raise CivitasAPIError(resp.error or "Failed to get status")
         return resp.data
+
+    # ─── System Agent discovery (星星之火) ────────────────────────────
+
+    def list_system_agents(self) -> Dict[str, str]:
+        """Return the well-known system agents available on every CivitasOS node.
+
+        These agents are bootstrapped automatically when a node starts.
+        You can immediately delegate tasks to them without any setup.
+
+        Returns:
+            Dict mapping agent ID to description.
+        """
+        return dict(SYSTEM_AGENTS)
+
+    def ask_guardian(self, action: str) -> Any:
+        """Validate an action against the 10 safety axioms via @guardian."""
+        return self.delegate_task("@guardian", "axiom-validate", {"action": action})
+
+    def query_reputation(self, agent_id: str) -> Any:
+        """Query an agent's reputation score and trust tier via @reputation."""
+        return self.delegate_task("@reputation", "reputation-query", {"agent_id": agent_id})
+
+    def post_to_marketplace(self, capability: str, min_reputation: float = 0.3, **kwargs) -> Any:
+        """Post a task to @marketplace for matching with capable agents."""
+        payload = {"capability": capability, "min_reputation": min_reputation}
+        payload.update(kwargs)
+        return self.delegate_task("@marketplace", "task-post", payload)
+
+    def find_best_agent(self, capability: str) -> Any:
+        """Ask @marketplace to auto-match the best agent for a capability."""
+        return self.delegate_task("@marketplace", "task-match", {"capability": capability})
+
+    def negotiate_chain(self, agent_a: str, agent_b: str) -> Any:
+        """Ask @settler to negotiate the best settlement chain between two agents."""
+        return self.delegate_task("@settler", "chain-negotiate", {"agent_a": agent_a, "agent_b": agent_b})
 
     # ─── Agent lifecycle ─────────────────────────────────────────────
 

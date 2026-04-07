@@ -471,4 +471,72 @@ export class CivitasOS {
     marketStats() {
         return this.get("/multi/market/stats");
     }
+
+    // ── System Agents (星星之火: always available on any node) ───────────
+
+    /** Well-known system agents bootstrapped on every CivitasOS node. */
+    static readonly SYSTEM_AGENTS: Record<string, string> = {
+        "@guardian": "Constitutional Guardian — axiom validation, violation adjudication",
+        "@reputation": "Reputation Oracle — trust queries, trust proofs, reputation history",
+        "@marketplace": "Task Marketplace — post tasks, discover tasks, auto-matching",
+        "@settler": "Settlement Coordinator — cross-chain settlement, chain negotiation",
+        "@governor": "Governance Coordinator — proposals, voting, parameter changes",
+        "@auditor": "System Auditor — audit trails, anomaly detection, compliance",
+        "@oracle": "Data Oracle — chain state, timestamps, external data feeds",
+    };
+
+    /** Check if an agent ID is a system agent. */
+    static isSystemAgent(agentId: string): boolean {
+        return agentId in CivitasOS.SYSTEM_AGENTS;
+    }
+
+    /** List all system agents available on this node. */
+    listSystemAgents(): Record<string, string> {
+        return { ...CivitasOS.SYSTEM_AGENTS };
+    }
+
+    /** Validate an action against safety axioms via @guardian. */
+    askGuardian(action: string) {
+        return this.post("/a2a/delegate", {
+            to_agent: "@guardian",
+            capability_id: "axiom-validate",
+            input: { action },
+        });
+    }
+
+    /** Query an agent's reputation via @reputation. */
+    queryReputation(agentId: string) {
+        return this.post("/a2a/delegate", {
+            to_agent: "@reputation",
+            capability_id: "reputation-query",
+            input: { agent_id: agentId },
+        });
+    }
+
+    /** Post a task to @marketplace for auto-matching. */
+    postToMarketplace(capability: string, minReputation = 0.3) {
+        return this.post("/a2a/delegate", {
+            to_agent: "@marketplace",
+            capability_id: "task-post",
+            input: { capability, min_reputation: minReputation },
+        });
+    }
+
+    /** Ask @marketplace to find the best agent for a capability. */
+    findBestAgent(capability: string) {
+        return this.post("/a2a/delegate", {
+            to_agent: "@marketplace",
+            capability_id: "task-match",
+            input: { capability },
+        });
+    }
+
+    /** Negotiate settlement chain between two agents via @settler. */
+    negotiateChain(agentA: string, agentB: string) {
+        return this.post("/a2a/delegate", {
+            to_agent: "@settler",
+            capability_id: "chain-negotiate",
+            input: { agent_a: agentA, agent_b: agentB },
+        });
+    }
 }
