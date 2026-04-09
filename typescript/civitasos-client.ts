@@ -506,6 +506,86 @@ export class CivitasOS {
         return this.get("/multi/market/stats");
     }
 
+    // ── Webhook 推送通知 ─────────────────────────────────────────────────
+
+    /** Register a webhook subscription for A2A task events. */
+    webhookRegister(
+        callbackUrl: string,
+        events: string[] = ["task.posted", "task.claimed", "task.completed", "task.failed", "task.settled"],
+        agentId?: string,
+    ) {
+        return this.post<{ subscription_id: string; agent_id: string; events: string[]; registered: boolean }>(
+            "/a2a/webhooks/register",
+            { agent_id: agentId, callback_url: callbackUrl, events },
+        );
+    }
+
+    /** Unregister a webhook subscription. */
+    webhookUnregister(subscriptionId: string) {
+        return this.post("/a2a/webhooks/unregister", { subscription_id: subscriptionId });
+    }
+
+    /** List all active webhook subscriptions. */
+    webhookList() {
+        return this.get<{ subscriptions: unknown[]; count: number }>("/a2a/webhooks/list");
+    }
+
+    // ── 动态任务生成 (Subtask Rules) ─────────────────────────────────────
+
+    /** Register a dynamic subtask generation rule. */
+    subtaskRuleRegister(
+        triggerCapability: string,
+        subtaskCapability: string,
+        description: string,
+        triggerOn: "success" | "failure" | "always" = "success",
+        reward = 100,
+    ) {
+        return this.post("/a2a/subtask-rules", {
+            trigger_capability: triggerCapability,
+            subtask_capability: subtaskCapability,
+            description,
+            trigger_on: triggerOn,
+            reward,
+        });
+    }
+
+    /** List all subtask generation rules. */
+    subtaskRuleList() {
+        return this.get<{ rules: unknown[]; count: number }>("/a2a/subtask-rules");
+    }
+
+    /** Delete a subtask generation rule by index. */
+    subtaskRuleDelete(ruleId: number) {
+        return this.del(`/a2a/subtask-rules/${ruleId}`);
+    }
+
+    // ── 任务自动认领 (Auto-Claim) ────────────────────────────────────────
+
+    /** Register auto-claim preferences for an agent. */
+    autoClaimRegister(
+        agentId: string,
+        capabilities: string[],
+        opts?: { minReward?: number; maxReward?: number; enabled?: boolean },
+    ) {
+        return this.post("/a2a/auto-claim/register", {
+            agent_id: agentId,
+            capabilities,
+            min_reward: opts?.minReward,
+            max_reward: opts?.maxReward,
+            enabled: opts?.enabled ?? true,
+        });
+    }
+
+    /** List all auto-claim preferences. */
+    autoClaimList() {
+        return this.get<{ preferences: unknown[]; count: number }>("/a2a/auto-claim/list");
+    }
+
+    /** Remove auto-claim preferences for an agent. */
+    autoClaimDelete(agentId: string) {
+        return this.del(`/a2a/auto-claim/${agentId}`);
+    }
+
     // ── System Agents (星星之火: always available on any node) ───────────
 
     /** Well-known system agents bootstrapped on every CivitasOS node. */

@@ -967,6 +967,146 @@ class CivitasAgent:
         """List all tasks in the pool."""
         return self._a2a_request("GET", "/pool/tasks")
 
+    # ─── Webhook 推送通知 ────────────────────────────────────────────
+
+    def webhook_register(
+        self,
+        callback_url: str,
+        events: Optional[List[str]] = None,
+        agent_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Register a webhook subscription for A2A task events.
+
+        Args:
+            callback_url: URL to receive webhook POST notifications
+            events: List of event types to subscribe to. Defaults to all events.
+                Valid events: task.posted, task.claimed, task.completed,
+                task.failed, task.settled, agent.registered
+            agent_id: Agent registering the webhook (defaults to self)
+
+        Returns:
+            Dict with subscription_id, agent_id, events, registered
+        """
+        return self._a2a_request("POST", "/webhooks/register", {
+            "agent_id": agent_id or self._agent_id or "anonymous",
+            "callback_url": callback_url,
+            "events": events or [
+                "task.posted", "task.claimed", "task.completed",
+                "task.failed", "task.settled",
+            ],
+        })
+
+    def webhook_unregister(self, subscription_id: str) -> Dict[str, Any]:
+        """Unregister a webhook subscription.
+
+        Args:
+            subscription_id: The subscription ID returned from webhook_register
+        """
+        return self._a2a_request("POST", "/webhooks/unregister", {
+            "subscription_id": subscription_id,
+        })
+
+    def webhook_list(self) -> Dict[str, Any]:
+        """List all active webhook subscriptions."""
+        return self._a2a_request("GET", "/webhooks/list")
+
+    # ─── 动态任务生成 (Subtask Rules) ────────────────────────────────
+
+    def subtask_rule_register(
+        self,
+        trigger_capability: str,
+        subtask_capability: str,
+        description: str,
+        trigger_on: str = "success",
+        reward: int = 100,
+    ) -> Dict[str, Any]:
+        """Register a dynamic subtask generation rule.
+
+        When a task with trigger_capability is settled, a new subtask
+        requiring subtask_capability is automatically created.
+
+        Args:
+            trigger_capability: Source capability that triggers generation
+            subtask_capability: Capability required for the generated subtask
+            description: Description of the subtask
+            trigger_on: When to trigger — "success", "failure", or "always"
+            reward: Reward for the generated subtask
+
+        Returns:
+            Dict with registered, rule, total_rules
+        """
+        return self._a2a_request("POST", "/subtask-rules", {
+            "trigger_capability": trigger_capability,
+            "subtask_capability": subtask_capability,
+            "description": description,
+            "trigger_on": trigger_on,
+            "reward": reward,
+        })
+
+    def subtask_rule_list(self) -> Dict[str, Any]:
+        """List all subtask generation rules."""
+        return self._a2a_request("GET", "/subtask-rules")
+
+    def subtask_rule_delete(self, rule_id: int) -> Dict[str, Any]:
+        """Delete a subtask generation rule by index.
+
+        Args:
+            rule_id: Zero-based index of the rule to delete
+        """
+        return self._a2a_request("DELETE", f"/subtask-rules/{rule_id}")
+
+    # ─── 任务自动认领 (Auto-Claim) ───────────────────────────────────
+
+    def auto_claim_register(
+        self,
+        capabilities: List[str],
+        agent_id: Optional[str] = None,
+        min_reward: Optional[int] = None,
+        max_reward: Optional[int] = None,
+        enabled: bool = True,
+    ) -> Dict[str, Any]:
+        """Register auto-claim preferences for an agent.
+
+        When a new task is posted matching one of the listed capabilities,
+        the agent will automatically claim it (if concurrency allows and
+        reward is within range).
+
+        Args:
+            capabilities: Capabilities the agent wants to auto-claim
+            agent_id: Agent ID (defaults to self)
+            min_reward: Minimum reward threshold
+            max_reward: Maximum reward threshold
+            enabled: Whether auto-claim is active
+
+        Returns:
+            Dict with registered, preference
+        """
+        body: Dict[str, Any] = {
+            "agent_id": agent_id or self._agent_id or "anonymous",
+            "capabilities": capabilities,
+            "enabled": enabled,
+        }
+        if min_reward is not None:
+            body["min_reward"] = min_reward
+        if max_reward is not None:
+            body["max_reward"] = max_reward
+        return self._a2a_request("POST", "/auto-claim/register", body)
+
+    def auto_claim_list(self) -> Dict[str, Any]:
+        """List all auto-claim preferences."""
+        return self._a2a_request("GET", "/auto-claim/list")
+
+    def auto_claim_delete(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
+        """Remove auto-claim preferences for an agent.
+
+        Args:
+            agent_id: Agent ID (defaults to self)
+        """
+        aid = agent_id or self._agent_id
+        if not aid:
+            raise CivitasError("No agent_id specified")
+        return self._a2a_request("DELETE", f"/auto-claim/{aid}")
+
     # ─── Phase B: Capability Management ──────────────────────────────
 
     def update_capabilities(
