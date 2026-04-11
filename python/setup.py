@@ -13,10 +13,10 @@ setup(
     url="https://github.com/ThneAI/civitasos-sdk",
     license="MIT",
     python_requires=">=3.9",
+    packages=["civitasos"],
     py_modules=["civitasos_sdk", "civitasos_client", "civitasos_cli"],
-    install_requires=[],
+    install_requires=["PyNaCl>=1.5.0"],
     extras_require={
-        "crypto": ["PyNaCl>=1.5.0"],
         "async": ["aiohttp>=3.9.0"],
     },
     entry_points={

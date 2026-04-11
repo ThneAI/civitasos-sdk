@@ -16,12 +16,16 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 
+dependencies = ["PyNaCl>=1.5.0"]
+
 [project.optional-dependencies]
-crypto = ["PyNaCl>=1.5.0"]
 async = ["aiohttp>=3.9.0"]
 
 [project.scripts]
 civitasos = "civitasos_cli:main"
+
+[tool.setuptools]
+packages = ["civitasos"]
 
 [project.urls]
 Homepage = "https://github.com/ThneAI/civitasos-sdk"

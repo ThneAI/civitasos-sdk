@@ -4,17 +4,24 @@
  * @example
  * ```ts
  * import { CivitasOS } from "./civitasos-client";
+ * // Single node
  * const client = new CivitasOS("http://127.0.0.1:8099");
+ * // Multi-node with auto-discovery
+ * const cluster = new CivitasOS(["http://node1:8099", "http://node2:8100"]);
  * const status = await client.status();
  * ```
  */
 
 export interface CivitasOSConfig {
-    baseUrl: string;
+    baseUrl: string | string[];
     apiKey?: string;
     /** JWT bearer token for authenticated requests. */
     token?: string;
     timeout?: number;
+    /** Agent ID for pool/task operations. */
+    agentId?: string;
+    /** Auto-discover cluster nodes on startup (default: true). */
+    autoDiscover?: boolean;
 }
 
 export class CivitasOS {
@@ -22,17 +29,56 @@ export class CivitasOS {
     private apiKey?: string;
     private token?: string;
     private timeout: number;
+    agentId?: string;
+    private nodes: string[];
+    private nodeIndex = 0;
 
-    constructor(baseUrlOrConfig: string | CivitasOSConfig) {
+    constructor(baseUrlOrConfig: string | string[] | CivitasOSConfig) {
         if (typeof baseUrlOrConfig === "string") {
-            this.baseUrl = baseUrlOrConfig.replace(/\/+$/, "");
+            this.nodes = [baseUrlOrConfig.replace(/\/+$/, "")];
+            this.timeout = 30_000;
+        } else if (Array.isArray(baseUrlOrConfig)) {
+            this.nodes = baseUrlOrConfig.map((u) => u.replace(/\/+$/, ""));
             this.timeout = 30_000;
         } else {
-            this.baseUrl = baseUrlOrConfig.baseUrl.replace(/\/+$/, "");
+            const urls = baseUrlOrConfig.baseUrl;
+            if (typeof urls === "string") {
+                this.nodes = [urls.replace(/\/+$/, "")];
+            } else {
+                this.nodes = urls.map((u) => u.replace(/\/+$/, ""));
+            }
             this.apiKey = baseUrlOrConfig.apiKey;
             this.token = baseUrlOrConfig.token;
             this.timeout = baseUrlOrConfig.timeout ?? 30_000;
+            this.agentId = baseUrlOrConfig.agentId;
         }
+        this.baseUrl = this.nodes[0];
+    }
+
+    /** Auto-discover cluster nodes. Call after construction if desired. */
+    async discoverNodes(): Promise<{ address: string; status: string }[]> {
+        try {
+            const resp = await this.get<{
+                data?: { nodes?: { address: string; status: string }[] };
+                nodes?: { address: string; status: string }[];
+            }>("/cluster/discovery");
+            const nodesData =
+                (resp as any)?.data?.nodes ?? (resp as any)?.nodes ?? [];
+            for (const n of nodesData) {
+                const addr = n.address?.replace(/\/+$/, "");
+                if (addr && n.status === "healthy" && !this.nodes.includes(addr)) {
+                    this.nodes.push(addr);
+                }
+            }
+            return nodesData;
+        } catch {
+            return [];
+        }
+    }
+
+    /** Get all known cluster node URLs. */
+    getNodes(): string[] {
+        return [...this.nodes];
     }
 
     /** Set the JWT bearer token for authenticated requests. */
@@ -83,9 +129,47 @@ export class CivitasOS {
                 throw new Error(`HTTP ${resp.status}: ${text}`);
             }
             return (await resp.json()) as T;
+        } catch (err) {
+            // On network error, try failover to next node
+            if (
+                err instanceof TypeError ||
+                (err instanceof DOMException && err.name === "AbortError")
+            ) {
+                if (await this.failover()) {
+                    clearTimeout(timer);
+                    return this.request<T>(method, path, body);
+                }
+            }
+            throw err;
         } finally {
             clearTimeout(timer);
         }
+    }
+
+    /** Try to switch to the next healthy node. */
+    private async failover(): Promise<boolean> {
+        if (this.nodes.length <= 1) return false;
+        const original = this.nodeIndex;
+        for (let i = 0; i < this.nodes.length - 1; i++) {
+            this.nodeIndex = (this.nodeIndex + 1) % this.nodes.length;
+            const candidate = this.nodes[this.nodeIndex];
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 2000);
+                const resp = await fetch(`${candidate}/healthz`, {
+                    signal: ctrl.signal,
+                });
+                clearTimeout(t);
+                if (resp.ok) {
+                    this.baseUrl = candidate;
+                    return true;
+                }
+            } catch {
+                continue;
+            }
+        }
+        this.nodeIndex = original;
+        return false;
     }
 
     private get<T = unknown>(path: string) {
@@ -559,6 +643,120 @@ export class CivitasOS {
         return this.del(`/a2a/subtask-rules/${ruleId}`);
     }
 
+    // ── Task Pool (A2A Shared Pool) ────────────────────────────────────
+
+    /** POST /a2a/pool/post — post a task to the shared pool. */
+    poolPost(
+        requiredCapability: string,
+        input?: unknown,
+        reward = 100,
+        minReputation = 0,
+        deadlineSecs?: number,
+    ) {
+        return this.post<{ task_id: string; status: string; auto_claimed_by: string | null }>(
+            "/a2a/pool/post",
+            {
+                requester: this.agentId ?? "anonymous",
+                required_capability: requiredCapability,
+                input: input ?? {},
+                reward,
+                min_reputation: minReputation,
+                ...(deadlineSecs !== undefined && { deadline_secs: deadlineSecs }),
+            },
+        );
+    }
+
+    /** POST /a2a/pool/discover — discover open tasks matching capabilities. */
+    poolDiscover(capabilities: string[]) {
+        return this.post<{ agent_id: string; reputation: number; tasks: unknown[]; total: number }>(
+            "/a2a/pool/discover",
+            { agent_id: this.agentId ?? "anonymous", capabilities },
+        );
+    }
+
+    /** POST /a2a/pool/claim — claim a pool task. */
+    poolClaim(taskId: string, agentId?: string) {
+        return this.post<{ claimed: boolean; task: unknown }>(
+            "/a2a/pool/claim",
+            { task_id: taskId, agent_id: agentId ?? this.agentId ?? "anonymous" },
+        );
+    }
+
+    /** POST /a2a/pool/complete/:taskId — mark a pool task as completed. */
+    poolComplete(taskId: string) {
+        return this.post<{ task_id: string; status: string }>(`/a2a/pool/complete/${taskId}`);
+    }
+
+    /** POST /a2a/pool/fail/:taskId — mark a pool task as failed. */
+    poolFail(taskId: string) {
+        return this.post<{ task_id: string; status: string }>(`/a2a/pool/fail/${taskId}`);
+    }
+
+    /** GET /a2a/pool/tasks — list all tasks in the pool. */
+    poolList() {
+        return this.get<{ tasks: unknown[]; total: number }>("/a2a/pool/tasks");
+    }
+
+    // ── Task Settlement (哲学经济结算) ───────────────────────────────────
+
+    /**
+     * POST /a2a/task/settle — settle a completed task.
+     *
+     * Triggers gas deduction, reward split (70% reputation / 30% balance),
+     * risk scoring, and balance cap enforcement (BALANCE_CAP=10,000).
+     */
+    taskSettle(opts: {
+        taskId: string;
+        workerAgent: string;
+        requesterAgent: string;
+        success?: boolean;
+        rewardAmount?: number;
+        result?: string;
+    }) {
+        return this.post<{
+            task_id: string;
+            settled: boolean;
+            worker_new_reputation: number;
+            worker_tier: string;
+            reward_applied: number;
+            gas_fee_charged: number;
+            message: string;
+        }>("/a2a/task/settle", {
+            task_id: opts.taskId,
+            worker_agent: opts.workerAgent,
+            requester_agent: opts.requesterAgent,
+            success: opts.success ?? true,
+            reward_amount: opts.rewardAmount ?? 100,
+            result: opts.result ?? "",
+        });
+    }
+
+    // ── Economics (经济引擎查询) ────────────────────────────────────────
+
+    /** GET /economics/accounts — all accounts with balance, reputation, risk_score, potential. */
+    economicsAccounts() {
+        return this.get<{
+            success: boolean;
+            data: {
+                account_count: number;
+                accounts: Array<{
+                    id: string;
+                    balance: number;
+                    reputation_score: number;
+                    risk_score: number;
+                    staked_amount: number;
+                }>;
+                circulation: number;
+                total_supply: number;
+            };
+        }>("/economics/accounts");
+    }
+
+    /** GET /a2a/economics/gas-market — gas pricing state and parameters. */
+    economicsGasMarket() {
+        return this.get("/a2a/economics/gas-market");
+    }
+
     // ── 任务自动认领 (Auto-Claim) ────────────────────────────────────────
 
     /** Register auto-claim preferences for an agent. */
@@ -741,5 +939,87 @@ export class CivitasOS {
     /** Get R2R runtime statistics. */
     r2rStats() {
         return this.get("/r2r/stats");
+    }
+
+    // ── P3: Trust Transitivity Engine ────────────────────────────────
+
+    /** Discover agents reachable via transitive trust paths. */
+    r2rDiscoverByTrust(agentId: string, maxHops = 3, capability?: string) {
+        let qs = `?max_hops=${maxHops}`;
+        if (capability) qs += `&capability=${encodeURIComponent(capability)}`;
+        return this.get(`/r2r/discover/${agentId}${qs}`);
+    }
+
+    // ── P5: Adversarial Immune Response ──────────────────────────────
+
+    /** Trigger immune system response for an agent (quarantine/cool-down). */
+    r2rImmuneResponse(agentId: string) {
+        return this.post(`/r2r/immune-response/${agentId}`);
+    }
+
+    // ── P4: Constitutional Guardian Multi-sig ────────────────────────
+
+    /** Submit a steward signature to ratify a pending constitutional amendment. */
+    ratifyAmendment(proposalId: string, stewardId: string, signatureHex: string) {
+        return this.post("/constitution/ratify", {
+            proposal_id: proposalId,
+            steward_id: stewardId,
+            signature_hex: signatureHex,
+        });
+    }
+
+    /** Reject a pending constitutional amendment. */
+    rejectAmendment(proposalId: string, stewardId: string) {
+        return this.post("/constitution/reject", {
+            proposal_id: proposalId,
+            steward_id: stewardId,
+        });
+    }
+
+    /** List pending constitutional amendments awaiting ratification. */
+    getPendingAmendments() {
+        return this.get("/constitution/pending");
+    }
+
+    /** List constitutional stewards and ratification config. */
+    getStewards() {
+        return this.get("/constitution/stewards");
+    }
+
+    /** Add a new constitutional steward. */
+    addSteward(id: string, publicKey: string) {
+        return this.post("/constitution/stewards", { id, public_key: publicKey });
+    }
+
+    // ── MCP Tool Marketplace ─────────────────────────────────────────
+
+    /** Publish a tool to the MCP marketplace. */
+    mcpPublish(name: string, description: string, inputSchema: Record<string, unknown>, endpoint: string, transport: string = "http") {
+        return this.post("/mcp/publish", { name, description, input_schema: inputSchema, endpoint, transport });
+    }
+
+    /** Search for tools in the MCP marketplace. */
+    mcpSearch(query: string = "", capability: string = "") {
+        return this.post("/mcp/search", { query, capability });
+    }
+
+    /** Install a tool from the MCP marketplace. */
+    mcpInstall(toolId: string, agentId: string = "") {
+        return this.post("/mcp/install", { tool_id: toolId, agent_id: agentId });
+    }
+
+    /** Uninstall a previously installed MCP tool. */
+    mcpUninstall(toolId: string) {
+        return this.post(`/mcp/uninstall/${toolId}`);
+    }
+
+    /** Invoke an installed MCP tool. */
+    mcpInvoke(toolId: string, input: Record<string, unknown>) {
+        return this.post("/mcp/invoke", { tool_id: toolId, input });
+    }
+
+    /** Get MCP marketplace statistics. */
+    mcpStats() {
+        return this.get("/mcp/stats");
     }
 }

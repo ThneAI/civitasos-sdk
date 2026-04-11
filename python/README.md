@@ -25,25 +25,76 @@ pip install -e .
 ## Quick Start
 
 ```python
-from civitasos_sdk import CivitasAgent
+from civitasos import CivitasAgent
 
-agent = CivitasAgent("http://localhost:8099")
+# Connect to a single node
+agent = CivitasAgent(os.environ.get("CIVITASOS_URL", "http://192.168.x.x:8099"))
 agent.register("my-agent", "My Agent", ["translation", "summarization"])
 print(agent.get_status())
 ```
 
-## Two-Agent Collaboration (5 minutes)
+> **Note:** `from civitasos_sdk import CivitasAgent` still works for backward
+> compatibility, but `from civitasos import ...` is the preferred import.
+
+## Multi-Node Cluster
 
 ```python
-from civitasos_sdk import CivitasAgent
+from civitasos import CivitasAgent
+
+# Pass multiple nodes — SDK auto-discovers peers and fails over
+agent = CivitasAgent([
+    "http://localhost:8099",
+    "http://localhost:8100",
+    "http://localhost:8101",
+])
+print(agent.nodes)  # all reachable nodes
+```
+
+## Authenticated Agent with Ed25519 Keys
+
+```python
+from civitasos import CivitasAgent
+
+agent = CivitasAgent("http://localhost:8099")
+agent.generate_keys()              # or agent.load_keys("keys.json")
+agent.register("secure-agent", "Secure Agent", ["compute"])
+agent.authenticate()               # JWT-based auth
+print(agent.public_key_hex)
+```
+
+## Worker Pattern — Task Pool Decorator
+
+```python
+from civitasos import CivitasAgent
+
+agent = CivitasAgent("http://localhost:8099")
+agent.a2a_quickstart(
+    agent_id="translator",
+    name="Translator",
+    capabilities=["translation"],
+)
+
+@agent.task_handler("translation")
+def handle_translation(task):
+    text = task["input"]["text"]
+    return {"translated": text.upper()}  # your logic here
+
+agent.start_worker(poll_interval=2.0)   # blocks, polling the pool
+# agent.stop_worker()                   # call from another thread to stop
+```
+
+## Two-Agent Collaboration
+
+```python
+from civitasos import CivitasAgent
 
 # Agent A: translator
 a = CivitasAgent("http://localhost:8099")
-a.a2a_register("translator", "Translator", "Translates text", ["translation"], "http://agent-a:8080")
+a.a2a_quickstart("translator", "Translator", ["translation"])
 
 # Agent B: summarizer — discovers A and delegates work
 b = CivitasAgent("http://localhost:8099")
-b.a2a_register("summarizer", "Summarizer", "Summarizes text", ["summarization"], "http://agent-b:8080")
+b.a2a_quickstart("summarizer", "Summarizer", ["summarization"])
 
 # B discovers A by capability
 translators = b.a2a_discover(capability_id="translation")
@@ -58,20 +109,51 @@ result = b.a2a_submit_task(
 print(f"Task submitted: {result['task_id']}")
 ```
 
+## R2R (Relation-to-Relation) Protocol
+
+```python
+# from_agent defaults to the agent's own ID — no need to pass it
+agent.r2r_propose_relation(to_agent="partner-1", relation_type="mentor")
+agent.r2r_rate_peer(to_agent="partner-1", aspect="quality", score=0.9)
+graph = agent.r2r_social_graph()
+```
+
+## Module Structure
+
+The SDK is organized into domain modules under `civitasos/`:
+
+| Module | Mixin Class | Domain |
+|--------|-------------|--------|
+| `_core.py` | `CoreMixin` | Transport, auth, keys, failover |
+| `_agent.py` | `AgentMixin` | Agent lifecycle, evolution, reputation |
+| `_governance.py` | `GovernanceMixin` | Proposals, voting, amendments |
+| `_cluster.py` | `ClusterMixin` | Cluster health, SLO, audit |
+| `_a2a.py` | `A2AMixin` | Agent-to-Agent protocol |
+| `_pool.py` | `PoolMixin` | Task pool, webhooks, worker |
+| `_r2r.py` | `R2RMixin` | R2R trust network |
+| `_advanced.py` | `AdvancedMixin` | DAGs, KV, marketplace, MCP, ZK |
+| `models.py` | — | Data classes, errors |
+
 ## Core API
 
 | Method | Description |
 |--------|-------------|
-| `register(id, name, capabilities)` | Register as agent |
+| `register(id, name, capabilities)` | Register in core registry |
+| `a2a_quickstart(id, name, capabilities)` | Full A2A bootstrap (register + card) |
 | `a2a_register(id, name, desc, caps, endpoint)` | Register with A2A card |
 | `a2a_discover(capability_id)` | Find agents by capability |
 | `a2a_submit_task(to, capability, input)` | Delegate task to another agent |
 | `a2a_get_reputation(agent_id)` | Query agent reputation & tier |
 | `pool_post(capability, input, reward)` | Post task to open pool |
+| `pool_discover(capability)` | Find open tasks |
 | `pool_claim(task_id)` | Claim a pool task |
 | `pool_complete(task_id)` | Complete a claimed task |
+| `task_handler(capability)(fn)` | Decorator for pool workers |
+| `start_worker(poll_interval)` | Start polling worker loop |
 | `create_proposal(title, desc, type)` | Create governance proposal |
 | `vote(proposal_id, choice, stake)` | Vote on proposal |
+| `r2r_propose_relation(to, type)` | Propose trust relation |
+| `r2r_rate_peer(to, aspect, score)` | Rate peer performance |
 | `dag_create(steps)` | Create task DAG |
 
 See [full API reference](https://github.com/ThneAI/civitasos/blob/main/civitasos/docs/API_REFERENCE.md).

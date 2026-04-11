@@ -1,25 +1,31 @@
 """CivitasOS Python Agent SDK — Example Usage
 
-Demonstrates: register, propose, vote, evolve, monitor.
+Demonstrates: keys, register, authenticate, governance,
+              A2A quickstart, pool worker, R2R, cluster monitoring.
+
 Start the backend first:
     cd civitasos-backend && cargo run
 """
 
-from civitasos_sdk import CivitasAgent, CivitasError
+from civitasos import CivitasAgent, CivitasError
 
 
 def main():
-    # Connect to local node
-    agent = CivitasAgent("http://localhost:8099")
+    # ── Connect (multi-node with automatic failover) ─────────────
+    agent = CivitasAgent([
+        "http://localhost:8099",
+        "http://localhost:8100",
+        "http://localhost:8101",
+    ])
 
-    # Wait for backend to be ready
     if not agent.wait_ready(timeout=10):
         print("❌ Backend not reachable")
         return
 
-    print("✓ Connected to CivitasOS")
+    print(f"✓ Connected to CivitasOS ({len(agent.nodes)} nodes)")
 
-    # ── 1. Register ──────────────────────────────────────────────────
+    # ── 1. Generate keys & register ──────────────────────────────
+    agent.generate_keys()
     try:
         info = agent.register(
             agent_id="sdk-demo-1",
@@ -31,13 +37,20 @@ def main():
     except CivitasError as e:
         print(f"  Registration note: {e}")
 
-    # ── 2. List agents ───────────────────────────────────────────────
+    # ── 2. Authenticate (JWT) ────────────────────────────────────
+    try:
+        agent.authenticate()
+        print(f"✓ Authenticated (key={agent.public_key_hex[:16]}…)")
+    except CivitasError as e:
+        print(f"  Auth note: {e}")
+
+    # ── 3. List agents ───────────────────────────────────────────
     agents = agent.get_agents()
     print(f"✓ Active agents: {len(agents)}")
     for a in agents[:5]:
         print(f"  - {a.id}: {a.capabilities} (stake={a.stake})")
 
-    # ── 3. Create proposal ───────────────────────────────────────────
+    # ── 4. Governance — propose & vote ───────────────────────────
     proposal_id = agent.create_proposal(
         title="SDK Test Proposal",
         description="Testing governance from Python SDK",
@@ -45,39 +58,58 @@ def main():
     )
     print(f"✓ Proposal created: {proposal_id}")
 
-    # ── 4. Vote ──────────────────────────────────────────────────────
     result = agent.vote(proposal_id, "approve", stake=200)
     print(f"✓ Vote cast: {result}")
 
-    # ── 5. Evolve ────────────────────────────────────────────────────
+    # ── 5. A2A quick-start ───────────────────────────────────────
     try:
-        evolve_result = agent.evolve(capabilities=["compute", "inference", "storage"], stake=800)
+        agent.a2a_quickstart(
+            agent_id="sdk-demo-1",
+            name="SDK Demo Agent",
+            capabilities=["compute", "inference"],
+        )
+        print("✓ A2A card bootstrapped")
+    except CivitasError as e:
+        print(f"  A2A note: {e}")
+
+    # ── 6. Pool — post a task ────────────────────────────────────
+    try:
+        task = agent.pool_post(
+            capability_id="compute",
+            input_data={"expr": "2+2"},
+            reward=10.0,
+        )
+        print(f"✓ Pool task posted: {task.get('task_id', 'N/A')}")
+    except CivitasError as e:
+        print(f"  Pool note: {e}")
+
+    # ── 7. R2R — propose relation & rate ─────────────────────────
+    try:
+        agent.r2r_propose_relation(to_agent="sdk-demo-1", relation_type="self-test")
+        agent.r2r_rate_peer(to_agent="sdk-demo-1", aspect="quality", score=0.95)
+        print("✓ R2R relation proposed & peer rated")
+    except CivitasError as e:
+        print(f"  R2R note: {e}")
+
+    # ── 8. Evolve ────────────────────────────────────────────────
+    try:
+        evolve_result = agent.evolve(
+            capabilities=["compute", "inference", "storage"], stake=800,
+        )
         print(f"✓ Evolved: {evolve_result}")
     except CivitasError as e:
         print(f"  Evolution note: {e}")
 
-    # ── 6. Reputation ────────────────────────────────────────────────
-    try:
-        rep = agent.get_reputation()
-        print(f"✓ Reputation: composite={rep.get('composite', 'N/A')}")
-    except CivitasError as e:
-        print(f"  Reputation note: {e}")
-
-    # ── 7. Cluster state ─────────────────────────────────────────────
+    # ── 9. Cluster health ────────────────────────────────────────
     state = agent.get_state_hash()
     print(f"✓ State hash: {state.get('hash', '')[:16]}...")
 
     peers = agent.get_peers()
     print(f"✓ Cluster peers: {len(peers)}")
 
-    suspects = agent.get_byzantine_suspects()
-    print(f"✓ Byzantine suspects: {len(suspects)}")
-
-    # ── 8. SLO Dashboard ─────────────────────────────────────────────
     slo = agent.get_slo_dashboard()
     print(f"✓ SLO: all_pass={slo.all_slo_pass}, p99={slo.p99_ms}ms, agents={slo.agents_count}")
 
-    # ── 9. Audit ─────────────────────────────────────────────────────
     events = agent.get_audit_events()
     print(f"✓ Audit events: {len(events)}")
 

@@ -226,9 +226,11 @@ class AsyncCivitasAgent:
             "min_reputation": min_reputation,
         })
 
-    async def pool_discover(self, capability: str, min_reputation: float = 0.0) -> List[Dict[str, Any]]:
+    async def pool_discover(self, capability: str = None, capabilities: list = None, min_reputation: float = 0.0) -> List[Dict[str, Any]]:
+        caps = capabilities or ([capability] if capability else [])
         return await self._a2a_request("POST", "/pool/discover", {
-            "capability": capability, "min_reputation": min_reputation,
+            "agent_id": self._agent_id or "anonymous",
+            "capabilities": caps,
         })
 
     async def pool_claim(self, task_id: str) -> Dict[str, Any]:
@@ -409,6 +411,60 @@ class AsyncCivitasAgent:
     async def r2r_stats(self) -> Dict[str, Any]:
         """Get R2R runtime statistics."""
         resp = await self._request("GET", "/r2r/stats")
+        return resp.data
+
+    # ─── P3: Trust Transitivity ──────────────────────────────────────
+
+    async def r2r_discover_by_trust(
+        self, agent_id: str, max_hops: int = 3, capability: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Discover agents via transitive trust paths."""
+        qs = f"?max_hops={max_hops}"
+        if capability:
+            qs += f"&capability={capability}"
+        resp = await self._request("GET", f"/r2r/discover/{agent_id}{qs}")
+        return resp.data
+
+    # ─── P5: Immune Response ─────────────────────────────────────────
+
+    async def r2r_immune_response(self, agent_id: str) -> Dict[str, Any]:
+        """Trigger immune system response (quarantine/cool-down)."""
+        resp = await self._request("POST", f"/r2r/immune-response/{agent_id}")
+        return resp.data
+
+    # ─── P4: Constitutional Guardian Multi-sig ───────────────────────
+
+    async def ratify_amendment(
+        self, proposal_id: str, steward_id: str, signature_hex: str
+    ) -> Dict[str, Any]:
+        """Submit steward signature to ratify a constitutional amendment."""
+        resp = await self._request("POST", "/constitution/ratify", {
+            "proposal_id": proposal_id, "steward_id": steward_id, "signature_hex": signature_hex,
+        })
+        return resp.data
+
+    async def reject_amendment(self, proposal_id: str, steward_id: str) -> Dict[str, Any]:
+        """Reject a pending constitutional amendment."""
+        resp = await self._request("POST", "/constitution/reject", {
+            "proposal_id": proposal_id, "steward_id": steward_id,
+        })
+        return resp.data
+
+    async def get_pending_amendments(self) -> Dict[str, Any]:
+        """List pending constitutional amendments."""
+        resp = await self._request("GET", "/constitution/pending")
+        return resp.data
+
+    async def get_stewards(self) -> Dict[str, Any]:
+        """List constitutional stewards and config."""
+        resp = await self._request("GET", "/constitution/stewards")
+        return resp.data
+
+    async def add_steward(self, steward_id: str, public_key: str) -> Dict[str, Any]:
+        """Add a new constitutional steward."""
+        resp = await self._request("POST", "/constitution/stewards", {
+            "id": steward_id, "public_key": public_key,
+        })
         return resp.data
 
     async def close(self):
