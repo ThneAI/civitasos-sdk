@@ -177,7 +177,8 @@ class AsyncCivitasAgent:
         if credentials:
             payload["credentials"] = credentials
         result = await self._a2a_request("POST", "/quickstart", payload)
-        self._agent_id = result.get("did") or result.get("agent_id", "")
+        agent = result.get("agent", {})
+        self._agent_id = agent.get("did") or result.get("did") or result.get("agent_id", "")
         return result
 
     async def a2a_register(
@@ -197,7 +198,8 @@ class AsyncCivitasAgent:
             "stake": stake, "initial_reputation": initial_reputation,
             "alias": alias,
         })
-        self._agent_id = card.get("did") or card.get("agent_id", "")
+        agent = card.get("agent", {})
+        self._agent_id = agent.get("did") or card.get("did") or card.get("agent_id", "")
         return card
 
     async def a2a_discover(

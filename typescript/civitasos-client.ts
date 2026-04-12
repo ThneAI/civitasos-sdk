@@ -358,7 +358,8 @@ export class CivitasOS {
         if (opts.credentials) payload.credentials = opts.credentials;
 
         const result = await this.post<Record<string, unknown>>("/a2a/quickstart", payload);
-        this.agentId = (result.did as string) ?? (result.agent_id as string) ?? undefined;
+        const agent = (result.agent as Record<string, unknown>) ?? {};
+        this.agentId = (agent.did as string) ?? (result.did as string) ?? (result.agent_id as string) ?? undefined;
         return result;
     }
 
@@ -391,7 +392,8 @@ export class CivitasOS {
             initial_reputation: opts.initialReputation ?? 0.3,
             alias: opts.alias,
         });
-        this.agentId = (result.did as string) ?? (result.agent_id as string) ?? undefined;
+        const agentData = (result.agent as Record<string, unknown>) ?? {};
+        this.agentId = (agentData.did as string) ?? (result.did as string) ?? (result.agent_id as string) ?? undefined;
         return result;
     }
 

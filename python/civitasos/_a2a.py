@@ -54,7 +54,8 @@ class A2AMixin:
         if credentials:
             payload["credentials"] = credentials
         result = self._a2a_request("POST", "/quickstart", payload)
-        self._agent_id = result.get("did") or result.get("agent_id", "")
+        agent = result.get("agent", {})
+        self._agent_id = agent.get("did") or result.get("did") or result.get("agent_id", "")
         return result
 
     def a2a_register(
@@ -96,7 +97,8 @@ class A2AMixin:
             "initial_reputation": initial_reputation,
             "alias": alias,
         })
-        self._agent_id = card.get("did") or card.get("agent_id", "")
+        agent = card.get("agent", {})
+        self._agent_id = agent.get("did") or card.get("did") or card.get("agent_id", "")
         return card
 
     def a2a_get_agent(self, agent_id: str) -> Dict[str, Any]:
