@@ -12,83 +12,91 @@ class A2AMixin:
 
     def a2a_quickstart(
         self,
-        agent_id: str,
         name: str,
         endpoint: str,
         description: str = "",
+        alias: Optional[str] = None,
         credentials: Optional[List[Dict[str, Any]]] = None,
         public_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """One-call agent registration with full card + bootstrap.
 
-        Creates an A2A agent card, enrolls credentials for higher initial
-        reputation, and returns next-steps guidance. Different from
-        ``register()`` which only creates a core registry entry.
+        Creates an A2A agent card (DID derived from public key server-side),
+        enrolls credentials for higher initial reputation, and returns
+        next-steps guidance.
 
         Args:
-            agent_id: Unique agent identifier
             name: Human-readable name
             endpoint: URL where this agent accepts A2A messages
             description: Optional description (auto-generated if omitted)
+            alias: Optional human-readable alias for the agent
             credentials: Optional bootstrap credentials for higher initial reputation.
                 Each credential is a dict with "type" and type-specific fields:
                 - {"type": "identity_verified"}
                 - {"type": "stake", "amount": 500}
                 - {"type": "referral", "voucher_id": "trusted-agent-1"}
                 - {"type": "capability", "capability_id": "data-analysis"}
-            public_key: Optional Ed25519 public key hex. If omitted and the
-                SDK has a generated identity, it is sent automatically.
+            public_key: Ed25519 public key hex. If omitted, the SDK's
+                auto-generated identity key is used.
         """
+        pk = public_key or self._public_key_hex
+        if not pk:
+            raise CivitasError("public_key is required (no auto-generated key available)")
         payload: Dict[str, Any] = {
-            "id": agent_id,
+            "public_key": pk,
             "name": name,
             "endpoint": endpoint,
         }
+        if alias:
+            payload["alias"] = alias
         if description:
             payload["description"] = description
         if credentials:
             payload["credentials"] = credentials
-        pk = public_key or self._public_key_hex
-        if pk:
-            payload["public_key"] = pk
         result = self._a2a_request("POST", "/quickstart", payload)
-        self._agent_id = agent_id
+        self._agent_id = result.get("did") or result.get("agent_id", "")
         return result
 
     def a2a_register(
         self,
-        agent_id: str,
         name: str,
         description: str,
         capabilities: List[Dict[str, Any]],
         endpoint: str = "",
         stake: int = 0,
         initial_reputation: float = 0.3,
+        alias: Optional[str] = None,
+        public_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Register an agent card in the A2A directory.
 
-        Creates a full agent card with structured capabilities.
-        Different from ``register()`` which uses the core API.
+        Creates a full agent card with DID derived from public key.
 
         Args:
-            agent_id: Unique agent identifier
             name: Human-readable name
             description: What this agent does
             capabilities: List of capability dicts with id, name, description
             endpoint: URL where this agent accepts A2A messages
             stake: Initial stake
             initial_reputation: Starting reputation (0.0-1.0)
+            alias: Optional human-readable alias
+            public_key: Ed25519 public key hex. If omitted, the SDK's
+                auto-generated identity key is used.
         """
+        pk = public_key or self._public_key_hex
+        if not pk:
+            raise CivitasError("public_key is required (no auto-generated key available)")
         card = self._a2a_request("POST", "/agents", {
-            "id": agent_id,
+            "public_key": pk,
             "name": name,
             "description": description,
             "endpoint": endpoint,
             "capabilities": capabilities,
             "stake": stake,
             "initial_reputation": initial_reputation,
+            "alias": alias,
         })
-        self._agent_id = agent_id
+        self._agent_id = card.get("did") or card.get("agent_id", "")
         return card
 
     def a2a_get_agent(self, agent_id: str) -> Dict[str, Any]:

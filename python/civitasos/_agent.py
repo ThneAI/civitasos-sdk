@@ -104,13 +104,14 @@ class AgentMixin:
 
         Args:
             capabilities: List of {id, name, description} dicts
-
-        Note:
-            Backend route not yet implemented. Reserved for future use.
+            agent_id: Agent to update (defaults to self)
         """
-        raise NotImplementedError(
-            "update_capabilities: backend route PUT /agents/:id/capabilities not yet implemented"
-        )
+        aid = agent_id or self._agent_id
+        if not aid:
+            raise CivitasError("No agent_id specified and no agent registered")
+        return self._a2a_request("PUT", f"/agents/{aid}/capabilities", {
+            "capabilities": capabilities,
+        })
 
     def promote_agent(self, agent_id: str, new_role: str) -> Dict[str, Any]:
         """Promote/demote an agent's role (Admin-only).
