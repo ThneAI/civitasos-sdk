@@ -19,6 +19,9 @@ class PoolMixin:
         reward: int = 100,
         min_reputation: float = 0.0,
         deadline_secs: Optional[int] = None,
+        allowed_agents: Optional[List[str]] = None,
+        blocked_agents: Optional[List[str]] = None,
+        required_stake: int = 0,
     ) -> Dict[str, Any]:
         """Post a task to the shared pool for any capable agent to claim."""
         body: Dict[str, Any] = {
@@ -30,6 +33,12 @@ class PoolMixin:
         }
         if deadline_secs is not None:
             body["deadline_secs"] = deadline_secs
+        if allowed_agents:
+            body["allowed_agents"] = allowed_agents
+        if blocked_agents:
+            body["blocked_agents"] = blocked_agents
+        if required_stake > 0:
+            body["required_stake"] = required_stake
         return self._a2a_request("POST", "/pool/post", body)
 
     def pool_discover(
@@ -50,15 +59,22 @@ class PoolMixin:
             "capabilities": caps,
         })
 
-    def pool_claim(self, task_id: str, agent_id: Optional[str] = None) -> Dict[str, Any]:
-        """Claim a pool task for execution."""
+    def pool_claim(self, task_id: str, agent_id: Optional[str] = None, stake_amount: int = 0) -> Dict[str, Any]:
+        """Claim a pool task for execution.
+
+        Args:
+            stake_amount: Collateral to lock. Must meet the task's required_stake.
+        """
         aid = agent_id or self._agent_id
         if not aid:
             raise CivitasError("No agent_id specified")
-        return self._a2a_request("POST", "/pool/claim", {
+        body: Dict[str, Any] = {
             "task_id": task_id,
             "agent_id": aid,
-        })
+        }
+        if stake_amount > 0:
+            body["stake_amount"] = stake_amount
+        return self._a2a_request("POST", "/pool/claim", body)
 
     def pool_complete(self, task_id: str) -> Dict[str, Any]:
         """Mark a pool task as completed."""
