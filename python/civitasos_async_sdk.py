@@ -8,9 +8,11 @@ Usage:
 
     async def main():
         async with AsyncCivitasAgent("http://localhost:8099") as agent:
-            await agent.a2a_register("my-agent", "My Agent", "Does things",
-                [{"id": "compute", "name": "Compute", "description": "..."}],
-                endpoint="http://localhost:9001")
+            await agent.a2a_register(
+                name="My Agent", description="Does things",
+                capabilities=[{"id": "compute", "name": "Compute", "description": "..."}],
+                endpoint="http://localhost:9001",
+            )  # DID derived from public_key automatically
             agents = await agent.a2a_discover(capability_id="compute")
             print(agents)
 
@@ -157,34 +159,45 @@ class AsyncCivitasAgent:
     # ─── A2A ─────────────────────────────────────────────────────
 
     async def a2a_quickstart(
-        self, agent_id: str, name: str, endpoint: str,
+        self, name: str, endpoint: str,
         description: str = "",
+        alias: Optional[str] = None,
         credentials: Optional[List[Dict[str, Any]]] = None,
         public_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """One-call agent registration with minimal parameters and optional bootstrap."""
-        payload: Dict[str, Any] = {"id": agent_id, "name": name, "endpoint": endpoint}
+        """One-call agent registration. DID derived from public_key server-side."""
+        pk = public_key or getattr(self, '_public_key_hex', None)
+        if not pk:
+            raise CivitasError("public_key is required")
+        payload: Dict[str, Any] = {"public_key": pk, "name": name, "endpoint": endpoint}
+        if alias:
+            payload["alias"] = alias
         if description:
             payload["description"] = description
         if credentials:
             payload["credentials"] = credentials
-        if public_key:
-            payload["public_key"] = public_key
         result = await self._a2a_request("POST", "/quickstart", payload)
-        self._agent_id = agent_id
+        self._agent_id = result.get("did") or result.get("agent_id", "")
         return result
 
     async def a2a_register(
-        self, agent_id: str, name: str, description: str,
+        self, name: str, description: str,
         capabilities: List[Dict[str, Any]], endpoint: str = "",
         stake: int = 0, initial_reputation: float = 0.3,
+        alias: Optional[str] = None,
+        public_key: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Register an agent card. DID derived from public_key server-side."""
+        pk = public_key or getattr(self, '_public_key_hex', None)
+        if not pk:
+            raise CivitasError("public_key is required")
         card = await self._a2a_request("POST", "/agents", {
-            "id": agent_id, "name": name, "description": description,
+            "public_key": pk, "name": name, "description": description,
             "endpoint": endpoint, "capabilities": capabilities,
             "stake": stake, "initial_reputation": initial_reputation,
+            "alias": alias,
         })
-        self._agent_id = agent_id
+        self._agent_id = card.get("did") or card.get("agent_id", "")
         return card
 
     async def a2a_discover(

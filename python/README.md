@@ -68,10 +68,11 @@ print(agent.public_key_hex)
 from civitasos import CivitasAgent
 
 agent = CivitasAgent("http://localhost:8099")
+agent.generate_keys()
 agent.a2a_quickstart(
-    agent_id="translator",
     name="Translator",
-    capabilities=["translation"],
+    endpoint="http://localhost:9001",
+    alias="translator",
 )
 
 @agent.task_handler("translation")
@@ -90,11 +91,13 @@ from civitasos import CivitasAgent
 
 # Agent A: translator
 a = CivitasAgent("http://localhost:8099")
-a.a2a_quickstart("translator", "Translator", ["translation"])
+a.generate_keys()
+a.a2a_quickstart(name="Translator", endpoint="http://localhost:9001", alias="translator")
 
 # Agent B: summarizer — discovers A and delegates work
 b = CivitasAgent("http://localhost:8099")
-b.a2a_quickstart("summarizer", "Summarizer", ["summarization"])
+b.generate_keys()
+b.a2a_quickstart(name="Summarizer", endpoint="http://localhost:9002", alias="summarizer")
 
 # B discovers A by capability
 translators = b.a2a_discover(capability_id="translation")
@@ -139,8 +142,8 @@ The SDK is organized into domain modules under `civitasos/`:
 | Method | Description |
 |--------|-------------|
 | `register(id, name, capabilities)` | Register in core registry |
-| `a2a_quickstart(id, name, capabilities)` | Full A2A bootstrap (register + card) |
-| `a2a_register(id, name, desc, caps, endpoint)` | Register with A2A card |
+| `a2a_quickstart(name, endpoint, ...)` | Full A2A bootstrap (DID from public_key) |
+| `a2a_register(name, desc, caps, ...)` | Register A2A card (DID from public_key) |
 | `a2a_discover(capability_id)` | Find agents by capability |
 | `a2a_submit_task(to, capability, input)` | Delegate task to another agent |
 | `a2a_get_reputation(agent_id)` | Query agent reputation & tier |

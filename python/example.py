@@ -64,9 +64,8 @@ def main():
     # ── 5. A2A quick-start ───────────────────────────────────────
     try:
         agent.a2a_quickstart(
-            agent_id="sdk-demo-1",
             name="SDK Demo Agent",
-            capabilities=["compute", "inference"],
+            endpoint="http://localhost:9001",
         )
         print("✓ A2A card bootstrapped")
     except CivitasError as e:

@@ -13,7 +13,7 @@ Usage:
     lc_agent = create_react_agent(llm, tools, prompt)
     civitas = CivitasLangChainAgent(
         base_url="http://localhost:8099",
-        agent_id="lc-qa-agent",
+        alias="lc-qa-agent",
         name="LangChain QA",
         description="RAG Q&A with LangChain",
         capabilities=[{"id": "qa", "name": "Q&A", "description": "Answer questions"}],
@@ -36,7 +36,7 @@ class CivitasLangChainAgent:
     def __init__(
         self,
         base_url: str = "http://localhost:8099",
-        agent_id: str = "langchain-agent",
+        alias: str = "langchain-agent",
         name: str = "LangChain Agent",
         description: str = "A LangChain-powered agent on CivitasOS",
         capabilities: Optional[List[Dict[str, str]]] = None,
@@ -44,7 +44,7 @@ class CivitasLangChainAgent:
         poll_interval: int = 5,
     ):
         self.client = CivitasAgent(base_url)
-        self.agent_id = agent_id
+        self.alias = alias
         self.name = name
         self.description = description
         self.capabilities = capabilities or [
@@ -72,9 +72,11 @@ class CivitasLangChainAgent:
 
     def register(self) -> Dict[str, Any]:
         """Register this agent with CivitasOS."""
+        self.client.generate_keys()
         return self.client.a2a_register(
-            self.agent_id, self.name, self.description,
-            self.capabilities, self.endpoint,
+            name=self.name, description=self.description,
+            capabilities=self.capabilities, endpoint=self.endpoint,
+            alias=self.alias,
         )
 
     def run(self, max_iterations: Optional[int] = None) -> None:

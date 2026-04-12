@@ -12,7 +12,7 @@ Usage:
     researcher = Agent(role="Researcher", goal="Research topics", ...)
     civitas = CivitasCrewAgent(
         base_url="http://localhost:8099",
-        agent_id="crew-researcher",
+        alias="crew-researcher",
         name="CrewAI Researcher",
         capabilities=[{"id": "research", "name": "Research", "description": "Deep research"}],
     )
@@ -34,7 +34,7 @@ class CivitasCrewAgent:
     def __init__(
         self,
         base_url: str = "http://localhost:8099",
-        agent_id: str = "crewai-agent",
+        alias: str = "crewai-agent",
         name: str = "CrewAI Agent",
         description: str = "A CrewAI-powered agent on CivitasOS",
         capabilities: Optional[List[Dict[str, str]]] = None,
@@ -42,7 +42,7 @@ class CivitasCrewAgent:
         poll_interval: int = 5,
     ):
         self.client = CivitasAgent(base_url)
-        self.agent_id = agent_id
+        self.alias = alias
         self.name = name
         self.description = description
         self.capabilities = capabilities or [
@@ -73,9 +73,11 @@ class CivitasCrewAgent:
 
     def register(self) -> Dict[str, Any]:
         """Register this agent with CivitasOS."""
+        self.client.generate_keys()
         return self.client.a2a_register(
-            self.agent_id, self.name, self.description,
-            self.capabilities, self.endpoint,
+            name=self.name, description=self.description,
+            capabilities=self.capabilities, endpoint=self.endpoint,
+            alias=self.alias,
         )
 
     def run(self, max_iterations: Optional[int] = None) -> None:

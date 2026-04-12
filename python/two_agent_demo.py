@@ -19,21 +19,25 @@ BASE = "http://localhost:8099"
 def main():
     # ── Agent A: Translator ──────────────────────────────────────
     alice = CivitasAgent(BASE)
+    alice.generate_keys()
     alice.a2a_register(
-        "translator-alice", "Alice the Translator",
-        "Translates text between languages",
-        [{"id": "translation", "name": "Translation", "description": "EN↔ZH translation"}],
+        name="Alice the Translator",
+        description="Translates text between languages",
+        capabilities=[{"id": "translation", "name": "Translation", "description": "EN↔ZH translation"}],
         endpoint="http://localhost:9001",
+        alias="translator-alice",
     )
     print("[Alice] Registered as translator")
 
     # ── Agent B: Summarizer (needs translation help) ─────────────
     bob = CivitasAgent(BASE)
+    bob.generate_keys()
     bob.a2a_register(
-        "summarizer-bob", "Bob the Summarizer",
-        "Summarizes documents",
-        [{"id": "summarization", "name": "Summarization", "description": "Text summarization"}],
+        name="Bob the Summarizer",
+        description="Summarizes documents",
+        capabilities=[{"id": "summarization", "name": "Summarization", "description": "Text summarization"}],
         endpoint="http://localhost:9002",
+        alias="summarizer-bob",
     )
     print("[Bob]   Registered as summarizer")
 

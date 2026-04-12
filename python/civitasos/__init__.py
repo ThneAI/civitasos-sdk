@@ -8,6 +8,8 @@ Usage::
     agent.generate_keys()
     agent.register("my-agent", "My Agent", ["compute"], stake=500)
     agent.authenticate()
+    # DID-based A2A registration:
+    agent.a2a_quickstart(name="My Agent", endpoint="http://localhost:9001")
 """
 
 from .models import (
