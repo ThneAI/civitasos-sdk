@@ -30,6 +30,7 @@ class CoreMixin:
         base_url: "str | List[str] | None" = None,
         timeout: int = 10,
         auto_discover: bool = True,
+        cognitive_provider: "Dict[str, Any] | None" = None,
     ):
         # Default: env var CIVITASOS_URL > http://localhost:8099
         if base_url is None:
@@ -51,6 +52,15 @@ class CoreMixin:
         self._node_index: int = 0
         self._task_handlers: Dict[str, Any] = {}
         self._worker_running: bool = False
+        # ─── CSP (Cognitive Service Provider) ─────────────────────────
+        # cognitive_provider={"url": "...", "token": "...", "services": ["memory","briefing"]}
+        self._csp_url: Optional[str] = None
+        self._csp_token: Optional[str] = None
+        self._csp_services: List[str] = []
+        if cognitive_provider:
+            self._csp_url = cognitive_provider["url"].rstrip("/")
+            self._csp_token = cognitive_provider.get("token")
+            self._csp_services = cognitive_provider.get("services", [])
         # Auto-discover cluster nodes on startup
         if auto_discover and len(self._nodes) >= 1:
             try:
@@ -315,6 +325,50 @@ class CoreMixin:
             if self._failover():
                 return self._a2a_request(method, path, body)
             raise CivitasConnectionError(f"Cannot connect to {url}: {e.reason}")
+
+    def _csp_request(self, method: str, path: str, body: Any = None) -> Any:
+        """HTTP request to the external Cognitive Service Provider."""
+        if not self._csp_url:
+            raise CivitasError("No cognitive_provider configured")
+        url = f"{self._csp_url}{path}"
+        data = json.dumps(body).encode("utf-8") if body else None
+        req = Request(url, data=data, method=method)
+        req.add_header("Content-Type", "application/json")
+        if self._csp_token:
+            req.add_header("Authorization", f"Bearer {self._csp_token}")
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except HTTPError as e:
+            raise CivitasAPIError(f"CSP error: {e}", e.code)
+        except URLError as e:
+            raise CivitasConnectionError(f"CSP unreachable at {url}: {e.reason}")
+
+    def _has_csp(self, service: str) -> bool:
+        """Check if a CSP is configured for the given service type."""
+        return bool(self._csp_url and service in self._csp_services)
+
+    def csp_discover(self) -> Dict[str, Any]:
+        """Query the CSP's capability discovery endpoint.
+
+        Returns the full ``/.well-known/csp-configuration`` document
+        including provider_id, services, auth schemes, and pricing.
+        Raises CivitasError if no CSP is configured.
+        """
+        if not self._csp_url:
+            raise CivitasError("No cognitive_provider configured")
+        url = f"{self._csp_url}/.well-known/csp-configuration"
+        req = Request(url, method="GET")
+        req.add_header("Content-Type", "application/json")
+        if self._csp_token:
+            req.add_header("Authorization", f"Bearer {self._csp_token}")
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except HTTPError as e:
+            raise CivitasAPIError(f"CSP discovery failed: {e}", e.code)
+        except URLError as e:
+            raise CivitasConnectionError(f"CSP unreachable at {url}: {e.reason}")
 
     # ─── API version ─────────────────────────────────────────────────
 

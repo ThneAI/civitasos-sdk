@@ -29,6 +29,12 @@ export interface CivitasOSConfig {
     agentId?: string;
     /** Auto-discover cluster nodes on startup (default: true). */
     autoDiscover?: boolean;
+    /** Cognitive Service Provider configuration for memory/briefing routing. */
+    cognitiveProvider?: {
+        url: string;
+        token?: string;
+        services: string[];
+    };
 }
 
 export class CivitasOS {
@@ -43,6 +49,10 @@ export class CivitasOS {
     private privateKey?: KeyObject;
     /** Ed25519 public key hex (32 bytes, 64 hex chars). */
     private publicKeyHex?: string;
+    /** CSP (Cognitive Service Provider) state. */
+    private cspUrl?: string;
+    private cspToken?: string;
+    private cspServices: string[] = [];
 
     constructor(baseUrlOrConfig: string | string[] | CivitasOSConfig) {
         if (typeof baseUrlOrConfig === "string") {
@@ -62,6 +72,11 @@ export class CivitasOS {
             this.token = baseUrlOrConfig.token;
             this.timeout = baseUrlOrConfig.timeout ?? 30_000;
             this.agentId = baseUrlOrConfig.agentId;
+            if (baseUrlOrConfig.cognitiveProvider) {
+                this.cspUrl = baseUrlOrConfig.cognitiveProvider.url.replace(/\/+$/, "");
+                this.cspToken = baseUrlOrConfig.cognitiveProvider.token;
+                this.cspServices = baseUrlOrConfig.cognitiveProvider.services ?? [];
+            }
         }
         this.baseUrl = this.nodes[0];
     }
@@ -1189,5 +1204,190 @@ export class CivitasOS {
     /** Get MCP marketplace statistics. */
     mcpStats() {
         return this.get("/mcp/stats");
+    }
+
+    // ── CSP: Cognitive Service Provider ──────────────────────────────
+
+    /** Check if a CSP service is configured. */
+    private hasCsp(service: string): boolean {
+        return !!this.cspUrl && this.cspServices.includes(service);
+    }
+
+    /** Make a request to the external CSP. */
+    private async cspRequest<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+        if (!this.cspUrl) throw new Error("No cognitiveProvider configured");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (this.cspToken) headers["Authorization"] = `Bearer ${this.cspToken}`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeout);
+        try {
+            const resp = await fetch(`${this.cspUrl}${path}`, {
+                method,
+                headers,
+                body: body !== undefined ? JSON.stringify(body) : undefined,
+                signal: controller.signal,
+            });
+            if (!resp.ok) {
+                const text = await resp.text();
+                throw new Error(`CSP HTTP ${resp.status}: ${text}`);
+            }
+            return (await resp.json()) as T;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /** Query the CSP's capability discovery endpoint. */
+    async cspDiscover(): Promise<Record<string, unknown>> {
+        if (!this.cspUrl) throw new Error("No cognitiveProvider configured");
+        return this.cspRequest("GET", "/.well-known/csp-configuration");
+    }
+
+    /** Store a value in persistent memory. Routed to CSP when configured. */
+    async remember(key: string, value: unknown, opts?: { ttlSecs?: number; tags?: string[] }): Promise<unknown> {
+        const aid = this.agentId ?? "anon";
+        if (this.hasCsp("memory")) {
+            const body: Record<string, unknown> = { value };
+            if (opts?.ttlSecs !== undefined) body.ttl_secs = opts.ttlSecs;
+            if (opts?.tags) body.tags = opts.tags;
+            return this.cspRequest("PUT", `/memory/${aid}/${key}`, body);
+        }
+        const nsKey = `mem:${aid}:${key}`;
+        return this.put(`/multi/kv/${nsKey}`, { value });
+    }
+
+    /** Retrieve a value from persistent memory. */
+    async recall(key: string): Promise<unknown> {
+        const aid = this.agentId ?? "anon";
+        if (this.hasCsp("memory")) {
+            try {
+                const result = await this.cspRequest<Record<string, unknown>>("GET", `/memory/${aid}/${key}`);
+                return result?.value ?? null;
+            } catch { return null; }
+        }
+        const nsKey = `mem:${aid}:${key}`;
+        try {
+            const result = await this.get<Record<string, unknown>>(`/multi/kv/${nsKey}`);
+            return (result as any)?.value ?? null;
+        } catch { return null; }
+    }
+
+    /** Delete a value from persistent memory. */
+    async forget(key: string): Promise<unknown> {
+        const aid = this.agentId ?? "anon";
+        if (this.hasCsp("memory")) {
+            return this.cspRequest("DELETE", `/memory/${aid}/${key}`);
+        }
+        const nsKey = `mem:${aid}:${key}`;
+        return this.del(`/multi/kv/${nsKey}`);
+    }
+
+    /** Semantic search across agent memories (requires CSP with memory.vector). */
+    async recallSimilar(query: string, topK = 5, filterTags?: string[]): Promise<unknown[]> {
+        if (!this.hasCsp("memory.vector")) throw new Error("recallSimilar requires CSP with memory.vector service");
+        const aid = this.agentId ?? "anon";
+        const body: Record<string, unknown> = { query, top_k: topK };
+        if (filterTags) body.filter = { tags: filterTags };
+        return this.cspRequest("POST", `/memory/vector/${aid}/search`, body);
+    }
+
+    /** Append an event to episodic memory (requires CSP with memory.episodic). */
+    async logEpisode(episodeId: string, data: Record<string, unknown>, opts?: { eventType?: string; timestamp?: string }): Promise<unknown> {
+        if (!this.hasCsp("memory.episodic")) throw new Error("logEpisode requires CSP with memory.episodic service");
+        const aid = this.agentId ?? "anon";
+        const body: Record<string, unknown> = { event_type: opts?.eventType ?? "generic", episode_id: episodeId, data };
+        if (opts?.timestamp) body.timestamp = opts.timestamp;
+        return this.cspRequest("POST", `/memory/episodic/${aid}/append`, body);
+    }
+
+    /** Query episodic memory timeline or replay a specific episode. */
+    async replayEpisodes(opts?: { since?: string; episodeId?: string }): Promise<unknown[]> {
+        if (!this.hasCsp("memory.episodic")) throw new Error("replayEpisodes requires CSP with memory.episodic service");
+        const aid = this.agentId ?? "anon";
+        if (opts?.episodeId) return this.cspRequest("GET", `/memory/episodic/${aid}/replay/${opts.episodeId}`);
+        const qs = opts?.since ? `?since=${opts.since}` : "";
+        return this.cspRequest("GET", `/memory/episodic/${aid}/timeline${qs}`);
+    }
+
+    /** List all memory keys for the current agent. */
+    async memoryListKeys(): Promise<string[]> {
+        const aid = this.agentId ?? "anon";
+        if (this.hasCsp("memory")) {
+            const result = await this.cspRequest<unknown>("GET", `/memory/${aid}`);
+            return Array.isArray(result) ? result : ((result as any)?.keys ?? []);
+        }
+        const result = await this.get<Record<string, unknown>>("/multi/kv");
+        const keys: string[] = ((result as any)?.keys ?? []) as string[];
+        const prefix = `mem:${aid}:`;
+        return keys.filter(k => k.startsWith(prefix)).map(k => k.slice(prefix.length));
+    }
+
+    /** Export all memory data (for CSP migration). */
+    async memoryExport(): Promise<unknown> {
+        if (!this.hasCsp("memory")) throw new Error("memoryExport requires CSP with memory service");
+        const aid = this.agentId ?? "anon";
+        return this.cspRequest("GET", `/memory/${aid}/export`);
+    }
+
+    /** Import memory data (for CSP migration). */
+    async memoryImport(data: Record<string, unknown>): Promise<unknown> {
+        if (!this.hasCsp("memory")) throw new Error("memoryImport requires CSP with memory service");
+        return this.cspRequest("POST", "/memory/import", data);
+    }
+
+    /** Get a unified cognitive briefing. Routed to CSP when configured. */
+    async briefing(opts?: { agentId?: string; enriched?: boolean }): Promise<Record<string, unknown>> {
+        const aid = opts?.agentId ?? this.agentId ?? "anonymous";
+        if (opts?.enriched && this.hasCsp("briefing.enriched")) {
+            return this.cspRequest("GET", `/briefing/${aid}?enriched=true`);
+        }
+        if (this.hasCsp("briefing")) {
+            return this.cspRequest("GET", `/briefing/${aid}`);
+        }
+        return this.get(`/a2a/briefing/${aid}`);
+    }
+
+    /** Browse available Cognitive Service Providers. */
+    async cspMarketplaceList(opts?: { service?: string; minStake?: number }): Promise<unknown[]> {
+        const p = new URLSearchParams();
+        if (opts?.service) p.set("service", opts.service);
+        if (opts?.minStake !== undefined) p.set("min_stake", String(opts.minStake));
+        const qs = p.toString();
+        const result = await this.get<Record<string, unknown>>(`/a2a/csp/marketplace/list${qs ? "?" + qs : ""}`);
+        return ((result as any)?.providers ?? []) as unknown[];
+    }
+
+    /** Rate a Cognitive Service Provider (1-5 stars). */
+    cspMarketplaceRate(providerId: string, rating: number, comment = "") {
+        return this.post("/a2a/csp/marketplace/rate", {
+            provider_id: providerId,
+            agent_did: this.agentId ?? "anon",
+            rating,
+            comment,
+        });
+    }
+
+    /** Bind (or switch) to a Cognitive Service Provider at runtime. */
+    async cspBind(providerUrl: string, services: string[], opts?: { token?: string; migrateData?: boolean }): Promise<unknown> {
+        const aid = this.agentId ?? "anon";
+        const result = await this.put(`/a2a/agents/${aid}/cognitive-provider`, {
+            provider_url: providerUrl,
+            services,
+            migrate_data: opts?.migrateData ?? false,
+        });
+        this.cspUrl = providerUrl.replace(/\/+$/, "");
+        this.cspToken = opts?.token;
+        this.cspServices = [...services];
+        return result;
+    }
+
+    /** Unbind from the current CSP and revert to built-in services. */
+    async cspUnbind(): Promise<unknown> {
+        const aid = this.agentId ?? "anon";
+        const result = await this.del(`/a2a/agents/${aid}/cognitive-provider`);
+        this.cspUrl = undefined;
+        this.cspToken = undefined;
+        this.cspServices = [];
+        return result;
     }
 }

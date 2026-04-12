@@ -72,6 +72,13 @@ class CivitasAPIError(CivitasError):
         self.hint = hint
 
 
+class CspServiceUnavailable(CivitasError):
+    """Raised when a CSP service is required but not configured or unavailable."""
+    def __init__(self, service: str):
+        super().__init__(f"CSP service '{service}' is not available — configure cognitive_provider with this service")
+        self.service = service
+
+
 # ─── System Agent IDs ────────────────────────────────────────────────
 SYSTEM_AGENTS = {
     "@guardian": "Constitutional Guardian — axiom validation, violation adjudication",

@@ -6,7 +6,7 @@ import json
 from typing import Any, Dict, List, Optional
 from urllib.request import Request, urlopen
 
-from .models import CivitasError
+from .models import CivitasError, CspServiceUnavailable
 
 
 class AdvancedMixin:
@@ -69,7 +69,224 @@ class AdvancedMixin:
         """Get gas market state and pricing parameters."""
         return self._request("GET", "/economics/gas-market")
 
+    def economics_stake(self, agent_id: str, amount: int) -> Dict[str, Any]:
+        """Stake tokens: move `amount` from balance to staked_amount.
+
+        Auto-creates an economic account (balance=1000) if the agent
+        is registered but has no account yet.
+
+        Note: New agents are auto-staked with the minimum requirement
+        (currently 10) at registration time, so manual staking is only
+        needed when you want to lock additional collateral.
+        """
+        return self._a2a_request("POST", "/economics/stake", {
+            "agent_id": agent_id, "amount": amount,
+        })
+
+    def economics_unstake(self, agent_id: str, amount: int) -> Dict[str, Any]:
+        """Unstake tokens: move `amount` from staked_amount back to balance.
+
+        Subject to the lock-up period (devnet: 5 min, mainnet: configurable).
+        """
+        return self._a2a_request("POST", "/economics/unstake", {
+            "agent_id": agent_id, "amount": amount,
+        })
+
     # ─── Multi-node Directory ────────────────────────────────────────
+
+    def briefing(self, agent_id: Optional[str] = None, enriched: bool = False) -> Dict[str, Any]:
+        """Get a unified cognitive briefing in a single call.
+
+        When a Cognitive Service Provider is configured with the ``briefing``
+        service, the request is routed to the CSP.  Otherwise falls back to
+        the built-in CivitasOS briefing endpoint.
+
+        Set ``enriched=True`` to request strategic advice and memory context
+        (requires CSP with ``briefing.enriched`` service).
+        """
+        aid = agent_id or getattr(self, "_agent_id", None) or "anonymous"
+        if enriched and self._has_csp("briefing.enriched"):
+            return self._csp_request("GET", f"/briefing/{aid}?enriched=true")
+        if self._has_csp("briefing"):
+            return self._csp_request("GET", f"/briefing/{aid}")
+        return self._a2a_request("GET", f"/briefing/{aid}")
+
+    def remember(self, key: str, value: Any, *, ttl_secs: Optional[int] = None, tags: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Store a value in persistent memory.
+
+        Routed to CSP when the ``memory`` service is configured.
+
+        Args:
+            key: Memory key.
+            value: Any JSON-serialisable value.
+            ttl_secs: Time-to-live in seconds (CSP only, ignored for built-in KV).
+            tags: Categorisation tags (CSP only).
+        """
+        aid = getattr(self, '_agent_id', 'anon')
+        if self._has_csp("memory"):
+            body: Dict[str, Any] = {"value": value}
+            if ttl_secs is not None:
+                body["ttl_secs"] = ttl_secs
+            if tags:
+                body["tags"] = tags
+            return self._csp_request("PUT", f"/memory/{aid}/{key}", body)
+        ns_key = f"mem:{aid}:{key}"
+        return self._request("PUT", f"/multi/kv/{ns_key}", {"value": value})
+
+    def recall(self, key: str) -> Any:
+        """Retrieve a value from persistent memory.
+
+        Returns the stored value, or ``None`` if the key does not exist.
+        """
+        aid = getattr(self, '_agent_id', 'anon')
+        if self._has_csp("memory"):
+            try:
+                result = self._csp_request("GET", f"/memory/{aid}/{key}")
+                return result.get("value")
+            except Exception:
+                return None
+        ns_key = f"mem:{aid}:{key}"
+        try:
+            result = self._request("GET", f"/multi/kv/{ns_key}")
+            return result.get("value")
+        except Exception:
+            return None
+
+    def forget(self, key: str) -> Dict[str, Any]:
+        """Delete a value from persistent memory."""
+        aid = getattr(self, '_agent_id', 'anon')
+        if self._has_csp("memory"):
+            return self._csp_request("DELETE", f"/memory/{aid}/{key}")
+        ns_key = f"mem:{aid}:{key}"
+        return self._request("DELETE", f"/multi/kv/{ns_key}")
+
+    def recall_similar(self, query: str, top_k: int = 5, filter_tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Semantic search across agent memories (requires CSP with ``memory.vector``)."""
+        if not self._has_csp("memory.vector"):
+            raise CspServiceUnavailable("memory.vector")
+        aid = getattr(self, '_agent_id', 'anon')
+        body: Dict[str, Any] = {"query": query, "top_k": top_k}
+        if filter_tags:
+            body["filter"] = {"tags": filter_tags}
+        return self._csp_request("POST", f"/memory/vector/{aid}/search", body)
+
+    # ─── Episodic Memory (CSP: memory.episodic) ──────────────────────
+
+    def log_episode(self, episode_id: str, data: Dict[str, Any], *, event_type: str = "generic", timestamp: Optional[str] = None) -> Dict[str, Any]:
+        """Append an event to the episodic memory timeline.
+
+        Requires CSP with ``memory.episodic`` service.
+        """
+        if not self._has_csp("memory.episodic"):
+            raise CspServiceUnavailable("memory.episodic")
+        aid = getattr(self, '_agent_id', 'anon')
+        body: Dict[str, Any] = {
+            "event_type": event_type,
+            "episode_id": episode_id,
+            "data": data,
+        }
+        if timestamp:
+            body["timestamp"] = timestamp
+        return self._csp_request("POST", f"/memory/episodic/{aid}/append", body)
+
+    def replay_episodes(self, *, since: Optional[str] = None, episode_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Query the episodic memory timeline or replay a specific episode.
+
+        Requires CSP with ``memory.episodic`` service.
+        """
+        if not self._has_csp("memory.episodic"):
+            raise CspServiceUnavailable("memory.episodic")
+        aid = getattr(self, '_agent_id', 'anon')
+        if episode_id:
+            return self._csp_request("GET", f"/memory/episodic/{aid}/replay/{episode_id}")
+        qs = f"?since={since}" if since else ""
+        return self._csp_request("GET", f"/memory/episodic/{aid}/timeline{qs}")
+
+    # ─── Memory Management ───────────────────────────────────────────
+
+    def memory_list_keys(self) -> List[str]:
+        """List all memory keys for the current agent.
+
+        Uses CSP when available, otherwise lists KV keys with the ``mem:`` prefix.
+        """
+        aid = getattr(self, '_agent_id', 'anon')
+        if self._has_csp("memory"):
+            result = self._csp_request("GET", f"/memory/{aid}")
+            return result if isinstance(result, list) else result.get("keys", [])
+        result = self._request("GET", "/multi/kv")
+        prefix = f"mem:{aid}:"
+        keys = result.get("keys", result.data.get("keys", []) if hasattr(result, 'data') and result.data else [])
+        return [k.replace(prefix, "", 1) for k in keys if isinstance(k, str) and k.startswith(prefix)]
+
+    def memory_export(self) -> Dict[str, Any]:
+        """Export all memory data (for CSP migration).
+
+        Requires CSP with ``memory`` service.
+        """
+        if not self._has_csp("memory"):
+            raise CspServiceUnavailable("memory")
+        aid = getattr(self, '_agent_id', 'anon')
+        return self._csp_request("GET", f"/memory/{aid}/export")
+
+    def memory_import(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Import memory data (for CSP migration).
+
+        Requires CSP with ``memory`` service.
+        """
+        if not self._has_csp("memory"):
+            raise CspServiceUnavailable("memory")
+        return self._csp_request("POST", "/memory/import", data)
+
+    # ─── CSP Marketplace ─────────────────────────────────────────────
+
+    def csp_marketplace_list(self, *, service: Optional[str] = None, min_stake: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Browse available Cognitive Service Providers."""
+        qs_parts = []
+        if service:
+            qs_parts.append(f"service={service}")
+        if min_stake is not None:
+            qs_parts.append(f"min_stake={min_stake}")
+        qs = "?" + "&".join(qs_parts) if qs_parts else ""
+        result = self._a2a_request("GET", f"/csp/marketplace/list{qs}")
+        return result.get("providers", []) if isinstance(result, dict) else result
+
+    def csp_marketplace_rate(self, provider_id: str, rating: int, comment: str = "") -> Dict[str, Any]:
+        """Rate a Cognitive Service Provider (1-5 stars)."""
+        aid = getattr(self, '_agent_id', 'anon')
+        return self._a2a_request("POST", "/csp/marketplace/rate", {
+            "provider_id": provider_id,
+            "agent_did": aid,
+            "rating": rating,
+            "comment": comment,
+        })
+
+    # ─── CSP Binding ─────────────────────────────────────────────────
+
+    def csp_bind(self, provider_url: str, services: List[str], *, token: Optional[str] = None, migrate_data: bool = False) -> Dict[str, Any]:
+        """Bind (or switch) to a Cognitive Service Provider at runtime.
+
+        Updates both the server-side binding and the local SDK routing.
+        """
+        aid = getattr(self, '_agent_id', 'anon')
+        result = self._a2a_request("PUT", f"/agents/{aid}/cognitive-provider", {
+            "provider_url": provider_url,
+            "services": services,
+            "migrate_data": migrate_data,
+        })
+        # Update local routing
+        self._csp_url = provider_url.rstrip("/")
+        self._csp_token = token
+        self._csp_services = list(services)
+        return result
+
+    def csp_unbind(self) -> Dict[str, Any]:
+        """Unbind from the current CSP and revert to CivitasOS built-in services."""
+        aid = getattr(self, '_agent_id', 'anon')
+        result = self._a2a_request("DELETE", f"/agents/{aid}/cognitive-provider")
+        self._csp_url = None
+        self._csp_token = None
+        self._csp_services = []
+        return result
 
     def directory_publish(
         self,

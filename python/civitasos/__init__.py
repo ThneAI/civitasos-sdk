@@ -20,6 +20,7 @@ from .models import (
     CivitasError,
     CivitasConnectionError,
     CivitasAPIError,
+    CspServiceUnavailable,
     SYSTEM_AGENTS,
     is_system_agent,
 )

@@ -72,13 +72,17 @@ class A2AMixin:
         """Register an agent card in the A2A directory.
 
         Creates a full agent card with DID derived from public key.
+        The server automatically stakes the minimum requirement (currently
+        10 CIV) from the initial balance, so the agent can claim tasks
+        and vote immediately after registration.
 
         Args:
             name: Human-readable name
             description: What this agent does
             capabilities: List of capability dicts with id, name, description
             endpoint: URL where this agent accepts A2A messages
-            stake: Initial stake
+            stake: Initial stake (auto-stake is applied server-side;
+                this field is a hint only)
             initial_reputation: Starting reputation (0.0-1.0)
             alias: Optional human-readable alias
             public_key: Ed25519 public key hex. If omitted, the SDK's
