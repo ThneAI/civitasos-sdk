@@ -48,13 +48,19 @@ class R2RMixin:
 
     def r2r_revive_relation(
         self,
-        agent_a: str,
-        agent_b: str,
+        to_agent: str,
+        from_agent: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Revive a dormant R2R relation."""
+        """Revive a dormant R2R relation.
+
+        Args:
+            to_agent: Other agent in the relation
+            from_agent: Agent initiating revival (defaults to self.agent_id)
+        """
+        a = from_agent or self._agent_id
         return self._request("PUT", "/r2r/relations/revive", {
-            "agent_a": agent_a,
-            "agent_b": agent_b,
+            "agent_a": a,
+            "agent_b": to_agent,
         })
 
     def r2r_send_signal(

@@ -192,6 +192,52 @@ class CoreMixin:
         if time.time() >= self._jwt_expires_at - 30:
             self.authenticate()
 
+    # ─── Identity persistence ────────────────────────────────────────
+
+    def save_identity(self, path: str) -> None:
+        """Persist the agent's key seed, DID, and alias to a JSON file.
+
+        The file is created with mode 0600 (owner read/write only).
+        Raises CivitasError if no signing key has been generated.
+        """
+        if self._signing_key is None:
+            raise CivitasError("No signing key — call generate_keys() or load_keys() first")
+        seed_hex = bytes(self._signing_key._seed).hex()  # type: ignore[attr-defined]
+        data = {
+            "seed_hex": seed_hex,
+            "public_key_hex": self._public_key_hex,
+            "agent_id": self._agent_id,
+        }
+        dir_path = os.path.dirname(path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, json.dumps(data, indent=2).encode("utf-8"))
+        finally:
+            os.close(fd)
+
+    def load_identity(self, path: str) -> str:
+        """Restore the agent's keys, DID, and alias from a saved JSON file.
+
+        Returns the public key hex string.
+        Raises CivitasError if the file is missing or malformed.
+        """
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            raise CivitasError(f"Identity file not found: {path}")
+        except json.JSONDecodeError:
+            raise CivitasError(f"Identity file is not valid JSON: {path}")
+        seed_hex = data.get("seed_hex")
+        if not seed_hex:
+            raise CivitasError("Identity file missing 'seed_hex' field")
+        self.load_keys(seed_hex)
+        if data.get("agent_id"):
+            self._agent_id = data["agent_id"]
+        return self._public_key_hex  # type: ignore[return-value]
+
     # ─── Low-level HTTP ──────────────────────────────────────────────
 
     def _request(self, method: str, path: str, body: Any = None) -> ApiResponse:
