@@ -5,6 +5,11 @@
 // ── Agent Card ───────────────────────────────────────────────────────
 
 export interface AgentCard {
+    /** Agent DID (e.g. did:civ:mainnet:z...) — primary identifier. */
+    did: string;
+    /** Human-readable alias (optional). */
+    alias?: string;
+    /** Legacy id field — may contain DID value for backward compatibility. */
     id: string;
     name: string;
     description?: string;
@@ -14,6 +19,8 @@ export interface AgentCard {
     stake: number;
     status: AgentStatus;
     created_at?: number;
+    /** Ed25519 public key hex (64 chars). */
+    public_key?: string;
 }
 
 export type AgentStatus = "active" | "suspended" | "quarantined" | "offline";

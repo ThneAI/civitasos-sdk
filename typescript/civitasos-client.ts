@@ -9,8 +9,15 @@
  * // Multi-node with auto-discovery
  * const cluster = new CivitasOS(["http://node1:8099", "http://node2:8100"]);
  * const status = await client.status();
+ *
+ * // DID-based A2A registration
+ * client.generateKeys();
+ * const result = await client.quickstart({ name: "My Agent", endpoint: "http://localhost:9001" });
+ * console.log(result.did);
  * ```
  */
+
+import { createPrivateKey, createPublicKey, sign, verify, randomBytes, KeyObject } from "node:crypto";
 
 export interface CivitasOSConfig {
     baseUrl: string | string[];
@@ -18,7 +25,7 @@ export interface CivitasOSConfig {
     /** JWT bearer token for authenticated requests. */
     token?: string;
     timeout?: number;
-    /** Agent ID for pool/task operations. */
+    /** Agent ID (DID) for pool/task operations. */
     agentId?: string;
     /** Auto-discover cluster nodes on startup (default: true). */
     autoDiscover?: boolean;
@@ -32,6 +39,10 @@ export class CivitasOS {
     agentId?: string;
     private nodes: string[];
     private nodeIndex = 0;
+    /** Ed25519 private key (Node.js KeyObject). */
+    private privateKey?: KeyObject;
+    /** Ed25519 public key hex (32 bytes, 64 hex chars). */
+    private publicKeyHex?: string;
 
     constructor(baseUrlOrConfig: string | string[] | CivitasOSConfig) {
         if (typeof baseUrlOrConfig === "string") {
@@ -200,38 +211,188 @@ export class CivitasOS {
         return this.get("/agents");
     }
 
+    // ── Ed25519 Key Management ───────────────────────────────────────────
+
     /**
-     * One-call agent registration with minimal parameters.
+     * Generate a new Ed25519 key pair. Returns the public key as hex (64 chars).
      *
-     * @param id       Unique agent identifier
-     * @param name     Human-readable name
-     * @param endpoint URL where this agent accepts A2A messages
-     * @param opts.description  Optional description
-     * @param opts.credentials  Bootstrap credentials for initial reputation boost:
+     * The public key is used for DID derivation on the server and for signing.
+     */
+    generateKeys(): string {
+        this.privateKey = createPrivateKey({
+            key: Buffer.concat([
+                // PKCS8 DER prefix for Ed25519: 16 bytes
+                Buffer.from("302e020100300506032b657004220420", "hex"),
+                randomBytes(32),
+            ]),
+            format: "der",
+            type: "pkcs8",
+        });
+        const pub = createPublicKey(this.privateKey);
+        // Export raw 32-byte public key from SubjectPublicKeyInfo DER
+        const spki = pub.export({ format: "der", type: "spki" });
+        this.publicKeyHex = (spki as Buffer).subarray(-32).toString("hex");
+        return this.publicKeyHex;
+    }
+
+    /**
+     * Load an Ed25519 key pair from a 32-byte seed (64 hex chars).
+     * Returns the public key hex.
+     */
+    loadKeys(seedHex: string): string {
+        const seedBytes = Buffer.from(seedHex, "hex");
+        if (seedBytes.length !== 32) {
+            throw new Error(`Seed must be 32 bytes, got ${seedBytes.length}`);
+        }
+        this.privateKey = createPrivateKey({
+            key: Buffer.concat([
+                Buffer.from("302e020100300506032b657004220420", "hex"),
+                seedBytes,
+            ]),
+            format: "der",
+            type: "pkcs8",
+        });
+        const pub = createPublicKey(this.privateKey);
+        const spki = pub.export({ format: "der", type: "spki" });
+        this.publicKeyHex = (spki as Buffer).subarray(-32).toString("hex");
+        return this.publicKeyHex;
+    }
+
+    /** Get the current public key hex, or undefined if not generated. */
+    getPublicKeyHex(): string | undefined {
+        return this.publicKeyHex;
+    }
+
+    /**
+     * Sign a message with the agent's Ed25519 private key.
+     * Returns hex-encoded 64-byte signature.
+     */
+    sign(message: Buffer | string): string {
+        if (!this.privateKey) {
+            throw new Error("No signing key — call generateKeys() or loadKeys() first");
+        }
+        const buf = typeof message === "string" ? Buffer.from(message) : message;
+        const sig = sign(null, buf, this.privateKey);
+        return sig.toString("hex");
+    }
+
+    /**
+     * Verify an Ed25519 signature.
+     */
+    verify(message: Buffer | string, signatureHex: string, publicKeyHex: string): boolean {
+        const pub = createPublicKey({
+            key: Buffer.concat([
+                Buffer.from("302a300506032b6570032100", "hex"),
+                Buffer.from(publicKeyHex, "hex"),
+            ]),
+            format: "der",
+            type: "spki",
+        });
+        const buf = typeof message === "string" ? Buffer.from(message) : message;
+        return verify(null, buf, pub, Buffer.from(signatureHex, "hex"));
+    }
+
+    /**
+     * Authenticate with the CivitasOS node and obtain a JWT.
+     *
+     * Requires that keys have been generated and the agent has been registered.
+     */
+    async authenticate(): Promise<{ token: string; expires_in: number; role: string }> {
+        if (!this.privateKey) {
+            throw new Error("No signing key — call generateKeys() or loadKeys() first");
+        }
+        if (!this.agentId) {
+            throw new Error("No agent registered — call quickstart() first");
+        }
+        const challenge = `civitasos-auth:${Math.floor(Date.now() / 1000)}`;
+        const signatureHex = this.sign(challenge);
+        const messageHex = Buffer.from(challenge).toString("hex");
+        const result = await this.post<{ token: string; expires_in: number; role: string }>(
+            "/auth/token",
+            { agent_id: this.agentId, signature: signatureHex, message: messageHex },
+        );
+        if (result.token) {
+            this.token = result.token;
+        }
+        return result;
+    }
+
+    // ── A2A Registration (DID-based) ─────────────────────────────────────
+
+    /**
+     * One-call agent registration with DID derived from Ed25519 public key.
+     *
+     * Call `generateKeys()` first to create the key pair used for DID derivation.
+     *
+     * @param opts.name        Human-readable agent name
+     * @param opts.endpoint    URL where this agent accepts A2A messages
+     * @param opts.description Optional description
+     * @param opts.alias       Optional human-readable alias
+     * @param opts.credentials Bootstrap credentials for initial reputation boost:
      *   - `{ type: "identity_verified" }`
      *   - `{ type: "stake", amount: 500 }`
      *   - `{ type: "referral", voucher_id: "trusted-agent-1" }`
      *   - `{ type: "capability", capability_id: "data-analysis" }`
-     * @returns Agent card, bootstrap result, and next steps guide
+     * @param opts.publicKey  Override public key hex (defaults to auto-generated)
+     * @returns Agent card with DID, bootstrap result, and next steps guide
      */
-    quickstart(
-        id: string,
-        name: string,
-        endpoint: string,
-        opts?: {
-            description?: string;
-            credentials?: Array<Record<string, unknown>>;
-            publicKey?: string;
+    async quickstart(opts: {
+        name: string;
+        endpoint: string;
+        description?: string;
+        alias?: string;
+        credentials?: Array<Record<string, unknown>>;
+        publicKey?: string;
+    }) {
+        const pk = opts.publicKey ?? this.publicKeyHex;
+        if (!pk) {
+            throw new Error("public_key is required — call generateKeys() first or pass publicKey");
         }
-    ) {
-        return this.post("/a2a/quickstart", {
-            id,
-            name,
-            endpoint,
-            description: opts?.description,
-            credentials: opts?.credentials,
-            public_key: opts?.publicKey,
+        const payload: Record<string, unknown> = {
+            public_key: pk,
+            name: opts.name,
+            endpoint: opts.endpoint,
+        };
+        if (opts.alias) payload.alias = opts.alias;
+        if (opts.description) payload.description = opts.description;
+        if (opts.credentials) payload.credentials = opts.credentials;
+
+        const result = await this.post<Record<string, unknown>>("/a2a/quickstart", payload);
+        this.agentId = (result.did as string) ?? (result.agent_id as string) ?? undefined;
+        return result;
+    }
+
+    /**
+     * Full A2A agent card registration with DID derived from public key.
+     *
+     * Call `generateKeys()` first to create the key pair.
+     */
+    async a2aRegister(opts: {
+        name: string;
+        description: string;
+        capabilities: Array<{ id: string; name: string; description?: string }>;
+        endpoint?: string;
+        stake?: number;
+        initialReputation?: number;
+        alias?: string;
+        publicKey?: string;
+    }) {
+        const pk = opts.publicKey ?? this.publicKeyHex;
+        if (!pk) {
+            throw new Error("public_key is required — call generateKeys() first or pass publicKey");
+        }
+        const result = await this.post<Record<string, unknown>>("/a2a/agents", {
+            public_key: pk,
+            name: opts.name,
+            description: opts.description,
+            capabilities: opts.capabilities,
+            endpoint: opts.endpoint ?? "",
+            stake: opts.stake ?? 0,
+            initial_reputation: opts.initialReputation ?? 0.3,
+            alias: opts.alias,
         });
+        this.agentId = (result.did as string) ?? (result.agent_id as string) ?? undefined;
+        return result;
     }
 
     registerAgent(
