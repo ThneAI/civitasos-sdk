@@ -144,6 +144,10 @@ class R2RMixin:
             "score": score,
         })
 
+    def r2r_get_relations(self, agent_id: str) -> Dict[str, Any]:
+        """List all R2R relations for a specific agent."""
+        return self._request("GET", f"/r2r/relations/{agent_id}")
+
     def r2r_social_graph(self, agent_id: str) -> Dict[str, Any]:
         """Get agent's social graph (relations, essence, aspect, stats)."""
         return self._request("GET", f"/r2r/social-graph/{agent_id}")

@@ -403,6 +403,11 @@ class AsyncCivitasAgent:
         })
         return resp.data
 
+    async def r2r_get_relations(self, agent_id: str) -> Dict[str, Any]:
+        """List all R2R relations for a specific agent."""
+        resp = await self._request("GET", f"/r2r/relations/{agent_id}")
+        return resp.data
+
     async def r2r_social_graph(self, agent_id: str) -> Dict[str, Any]:
         """Get agent's social graph."""
         resp = await self._request("GET", f"/r2r/social-graph/{agent_id}")

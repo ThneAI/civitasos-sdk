@@ -1079,6 +1079,11 @@ export class CivitasOS {
         return this.post("/r2r/rate", { rater, rated, dimension, score });
     }
 
+    /** List all R2R relations for a specific agent. */
+    r2rGetRelations(agentId: string) {
+        return this.get(`/r2r/relations/${agentId}`);
+    }
+
     /** Get agent's social graph (relations, essence, aspect, stats). */
     r2rSocialGraph(agentId: string) {
         return this.get(`/r2r/social-graph/${agentId}`);
