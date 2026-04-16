@@ -174,6 +174,14 @@ class R2RMixin:
         """Get R2R runtime statistics (agents, relations, tracked tasks)."""
         return self._request("GET", "/r2r/stats")
 
+    def r2r_flow_health(self) -> Dict[str, Any]:
+        """Get R2R relationship flow health (alias for r2r_stats).
+
+        Returns network_density, online_agents, active_relations, etc.
+        Used by the runtime to assess peer trust environment.
+        """
+        return self.r2r_stats()
+
     def r2r_discover_by_trust(
         self,
         agent_id: str,

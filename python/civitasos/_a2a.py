@@ -254,6 +254,18 @@ class A2AMixin:
             "event_value": event_value,
         })
 
+    # ─── Heartbeat ────────────────────────────────────────────────────
+
+    def heartbeat(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
+        """Send a heartbeat to keep the agent marked online.
+
+        Returns inbox_pending count and heartbeat_at timestamp.
+        """
+        aid = agent_id or self._agent_id
+        if not aid:
+            raise CivitasError("No agent_id specified")
+        return self._a2a_request("POST", f"/heartbeat/{aid}")
+
     # ─── Health & Audit ──────────────────────────────────────────────
 
     def a2a_health(self) -> List[Dict[str, Any]]:

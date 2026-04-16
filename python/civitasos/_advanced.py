@@ -72,7 +72,7 @@ class AdvancedMixin:
     def economics_stake(self, agent_id: str, amount: int) -> Dict[str, Any]:
         """Stake tokens: move `amount` from balance to staked_amount.
 
-        Auto-creates an economic account (balance=1000) if the agent
+        Auto-creates an economic account (balance=500) if the agent
         is registered but has no account yet.
 
         Note: New agents are auto-staked with the minimum requirement

@@ -14,7 +14,7 @@ class PoolMixin:
 
     def pool_post(
         self,
-        required_capability: str,
+        required_capability: Optional[str] = None,
         input_data: Any = None,
         reward: int = 100,
         min_reputation: float = 0.0,
@@ -22,15 +22,33 @@ class PoolMixin:
         allowed_agents: Optional[List[str]] = None,
         blocked_agents: Optional[List[str]] = None,
         required_stake: int = 0,
+        *,
+        description: Optional[str] = None,
+        required_capabilities: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Post a task to the shared pool for any capable agent to claim."""
+        """Post a task to the shared pool for any capable agent to claim.
+
+        Args:
+            required_capability: Primary capability needed (e.g. "translation").
+            description: Task description (sent as input if input_data is None).
+            required_capabilities: Alternative to required_capability (uses first item).
+            input_data: Arbitrary JSON input for the task.
+            reward: CIV reward for successful completion.
+        """
+        cap = required_capability
+        if not cap and required_capabilities:
+            cap = required_capabilities[0]
+        if not cap:
+            cap = "general"
         body: Dict[str, Any] = {
             "requester": self._agent_id or "anonymous",
-            "required_capability": required_capability,
-            "input": input_data or {},
+            "required_capability": cap,
+            "input": input_data or ({"description": description} if description else {}),
             "reward": reward,
             "min_reputation": min_reputation,
         }
+        if description:
+            body["description"] = description
         if deadline_secs is not None:
             body["deadline_secs"] = deadline_secs
         if allowed_agents:
@@ -76,13 +94,53 @@ class PoolMixin:
             body["stake_amount"] = stake_amount
         return self._a2a_request("POST", "/pool/claim", body)
 
-    def pool_complete(self, task_id: str) -> Dict[str, Any]:
-        """Mark a pool task as completed."""
+    def pool_complete(
+        self,
+        task_id: str,
+        output: Any = None,
+        success: bool = True,
+    ) -> Dict[str, Any]:
+        """Mark a pool task as completed.
+
+        If ``output`` is provided, delegates to ``task_execute`` so the result
+        is recorded and settlement occurs.  Otherwise does a simple state flip.
+        """
+        if output is not None:
+            return self.task_execute(task_id=task_id, output=output, success=success)
         return self._a2a_request("POST", f"/pool/complete/{task_id}")
 
     def pool_fail(self, task_id: str) -> Dict[str, Any]:
         """Mark a pool task as failed."""
         return self._a2a_request("POST", f"/pool/fail/{task_id}")
+
+    def pool_abandon(self, task_id: str) -> Dict[str, Any]:
+        """Abandon a claimed pool task (alias for pool_fail).
+
+        Use when the agent cannot complete a task it previously claimed.
+        Stake collateral may be forfeited.
+        """
+        return self.pool_fail(task_id)
+
+    def pool_confirm(self, task_id: str) -> Dict[str, Any]:
+        """Requester confirms delivered output — triggers settlement.
+
+        Call this after reviewing the worker's output (status = Delivered).
+        Transitions: Delivered → Completed. Worker stake is released and
+        reward is paid.
+        """
+        return self._a2a_request("POST", f"/pool/confirm/{task_id}")
+
+    def pool_dispute(self, task_id: str, reason: str = "") -> Dict[str, Any]:
+        """Requester disputes delivered output — penalizes worker.
+
+        Call this when the worker's output is empty, wrong, or low quality.
+        Transitions: Delivered → Disputed. Worker stake is forfeited and
+        reputation is penalized.
+        """
+        body: Dict[str, Any] = {}
+        if reason:
+            body["reason"] = reason
+        return self._a2a_request("POST", f"/pool/dispute/{task_id}", body or None)
 
     def pool_list(self) -> List[Dict[str, Any]]:
         """List all tasks in the pool."""
