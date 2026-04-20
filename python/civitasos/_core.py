@@ -310,14 +310,28 @@ class CoreMixin:
             with urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as e:
+            raw = b""
             try:
-                err_body = json.loads(e.read().decode("utf-8"))
+                raw = e.read()
+            except Exception:  # noqa: BLE001
+                pass
+            text = raw.decode("utf-8", errors="replace") if raw else ""
+            try:
+                err_body = json.loads(text) if text else {}
                 hint = err_body.get("hint", "")
                 msg = err_body.get("error", str(e))
                 if hint:
                     msg = f"{msg} (hint: {hint})"
                 raise CivitasAPIError(msg, e.code, hint=hint)
-            except (json.JSONDecodeError, CivitasAPIError):
+            except json.JSONDecodeError:
+                # Server returned a non-JSON body (plain text 4xx/5xx).
+                # Surface a useful CivitasAPIError so callers can branch on
+                # status code instead of crashing on JSON parse.
+                snippet = text[:200] if text else str(e)
+                raise CivitasAPIError(
+                    f"HTTP {e.code}: {snippet}", e.code, hint="non-JSON error body"
+                )
+            except CivitasAPIError:
                 raise
             except Exception:
                 raise CivitasAPIError(str(e), e.code)
