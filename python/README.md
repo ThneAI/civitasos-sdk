@@ -150,6 +150,8 @@ The SDK is organized into domain modules under `civitasos/`:
 | `pool_post(capability, input, reward)` | Post task to open pool |
 | `pool_discover(capability)` | Find open tasks |
 | `pool_claim(task_id)` | Claim a pool task |
+| `pool_get_task(task_id)` | Read one pool task, including G.1 challenge-window fields |
+| `pool_failures(agent_id, since, limit)` | Query G.1 failure-time index |
 | `pool_complete(task_id)` | Complete a claimed task |
 | `task_handler(capability)(fn)` | Decorator for pool workers |
 | `start_worker(poll_interval)` | Start polling worker loop |

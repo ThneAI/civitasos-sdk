@@ -25,6 +25,7 @@ import json
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 try:
     import aiohttp
@@ -252,6 +253,38 @@ class AsyncCivitasAgent:
         return await self._a2a_request("POST", "/pool/claim", {
             "task_id": task_id, "agent_id": self._agent_id or "anonymous",
         })
+
+    async def pool_list(self) -> List[Dict[str, Any]]:
+        return await self._a2a_request("GET", "/pool/tasks")
+
+    async def pool_get_task(self, task_id: str) -> Dict[str, Any]:
+        records = await self.pool_list()
+        if isinstance(records, dict):
+            records = records.get("tasks") or records.get("data") or []
+        for task in records:
+            if isinstance(task, dict) and (
+                task.get("id") == task_id or task.get("task_id") == task_id
+            ):
+                return task
+        raise CivitasError(f"pool task not found: {task_id}")
+
+    async def pool_failures(
+        self,
+        agent_id: Optional[str] = None,
+        since: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        query: Dict[str, Any] = {}
+        if agent_id:
+            query["agent_id"] = agent_id
+        if since:
+            query["since"] = since
+        if limit is not None:
+            query["limit"] = int(limit)
+        path = "/pool/failures"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return await self._a2a_request("GET", path)
 
     async def task_execute(
         self, task_id: str, output: Any, success: bool = True,

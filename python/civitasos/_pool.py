@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlencode
 
 from .models import CivitasError
 
@@ -145,6 +146,42 @@ class PoolMixin:
     def pool_list(self) -> List[Dict[str, Any]]:
         """List all tasks in the pool."""
         return self._a2a_request("GET", "/pool/tasks")
+
+    def pool_get_task(self, task_id: str) -> Dict[str, Any]:
+        """Return one pooled task by scanning the current pool snapshot.
+
+        Backend currently exposes a pool-wide list endpoint. This helper gives
+        callers a stable SDK-level read surface for G.1 challenge-window fields
+        such as ``challenge_deadline_at`` and ``failure_reason``.
+        """
+        records = self.pool_list()
+        if isinstance(records, dict):
+            records = records.get("tasks") or records.get("data") or []
+        for task in records:
+            if isinstance(task, dict) and (
+                task.get("id") == task_id or task.get("task_id") == task_id
+            ):
+                return task
+        raise CivitasError(f"pool task not found: {task_id}")
+
+    def pool_failures(
+        self,
+        agent_id: Optional[str] = None,
+        since: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Query the G.1 failure-time index for task failures."""
+        query: Dict[str, Any] = {}
+        if agent_id:
+            query["agent_id"] = agent_id
+        if since:
+            query["since"] = since
+        if limit is not None:
+            query["limit"] = int(limit)
+        path = "/pool/failures"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self._a2a_request("GET", path)
 
     # ─── Webhooks ────────────────────────────────────────────────────
 
