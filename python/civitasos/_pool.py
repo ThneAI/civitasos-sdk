@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from .models import CivitasError
 
@@ -150,10 +150,19 @@ class PoolMixin:
     def pool_get_task(self, task_id: str) -> Dict[str, Any]:
         """Return one pooled task by scanning the current pool snapshot.
 
-        Backend currently exposes a pool-wide list endpoint. This helper gives
-        callers a stable SDK-level read surface for G.1 challenge-window fields
-        such as ``challenge_deadline_at`` and ``failure_reason``.
+        Exposes a stable SDK-level read surface for G.1 challenge-window fields
+        such as ``challenge_deadline_at`` and ``failure_reason``. Falls back to
+        pool-wide scan for compatibility with older backends.
         """
+        try:
+            resp = self._a2a_request("GET", f"/pool/tasks/{quote(task_id, safe='')}")
+            if isinstance(resp, dict):
+                task = resp.get("task") or resp
+                if isinstance(task, dict):
+                    return task
+        except CivitasError:
+            pass
+
         records = self.pool_list()
         if isinstance(records, dict):
             records = records.get("tasks") or records.get("data") or []

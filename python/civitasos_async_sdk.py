@@ -25,7 +25,7 @@ import json
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 try:
     import aiohttp
@@ -258,6 +258,15 @@ class AsyncCivitasAgent:
         return await self._a2a_request("GET", "/pool/tasks")
 
     async def pool_get_task(self, task_id: str) -> Dict[str, Any]:
+        try:
+            resp = await self._a2a_request("GET", f"/pool/tasks/{quote(task_id, safe='')}")
+            if isinstance(resp, dict):
+                task = resp.get("task") or resp
+                if isinstance(task, dict):
+                    return task
+        except CivitasError:
+            pass
+
         records = await self.pool_list()
         if isinstance(records, dict):
             records = records.get("tasks") or records.get("data") or []
