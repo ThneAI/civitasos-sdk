@@ -177,6 +177,22 @@ class GovernanceMixin:
             f"/governance-store/proposals/{proposal_id}/governed-revision"
         ).data
 
+    def vote_governance_proposal(
+        self,
+        proposal_id: str,
+        voter_id: str,
+        choice: str = "yes",
+        stake: int = 100,
+        delegated: bool = False,
+    ) -> Dict[str, Any]:
+        """POST /api/v1/governance-store/proposals/:id/vote."""
+        return self._post(f"/governance-store/proposals/{proposal_id}/vote", {
+            "voter_id": voter_id,
+            "choice": choice,
+            "stake": stake,
+            "delegated": delegated,
+        }).data
+
     def governance_history(self, limit: int = 100) -> Dict[str, Any]:
         """GET /api/v1/governance-store/history."""
         return self._get(f"/governance-store/history?limit={limit}").data
