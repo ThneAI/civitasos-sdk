@@ -470,6 +470,28 @@ export class CivitasOS {
         return this.get(`/governance-store/proposals/${id}`);
     }
 
+    createNormativeRevision(params: {
+        proposer: string;
+        rule_id: string;
+        old_value: unknown;
+        new_value: unknown;
+        authority?: string;
+        source?: string;
+        title?: string;
+        description?: string;
+        iem_anchor?: unknown;
+    }) {
+        return this.post("/governance-store/normative-revisions", params);
+    }
+
+    getNormativeRevision(revisionId: string) {
+        return this.get(`/governance-store/normative-revisions/${revisionId}`);
+    }
+
+    getProposalGovernedRevision(proposalId: string) {
+        return this.get(`/governance-store/proposals/${proposalId}/governed-revision`);
+    }
+
     vote(
         proposalId: string,
         voterId: string,

@@ -138,6 +138,45 @@ class GovernanceMixin:
         return self._post(f"/governance-store/proposals/{proposal_id}/finalize",
                           {"approved": approved}).data
 
+    def create_normative_revision(
+        self,
+        proposer: str,
+        rule_id: str,
+        old_value: Any,
+        new_value: Any,
+        authority: str = "governance_council",
+        source: str = "backend_governance_read_model",
+        iem_anchor: Optional[Dict[str, Any]] = None,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """POST /api/v1/governance-store/normative-revisions."""
+        body: Dict[str, Any] = {
+            "proposer": proposer,
+            "rule_id": rule_id,
+            "old_value": old_value,
+            "new_value": new_value,
+            "authority": authority,
+            "source": source,
+        }
+        if iem_anchor is not None:
+            body["iem_anchor"] = iem_anchor
+        if title:
+            body["title"] = title
+        if description:
+            body["description"] = description
+        return self._post("/governance-store/normative-revisions", body).data
+
+    def get_normative_revision(self, revision_id: str) -> Dict[str, Any]:
+        """GET /api/v1/governance-store/normative-revisions/:id."""
+        return self._get(f"/governance-store/normative-revisions/{revision_id}").data
+
+    def get_proposal_governed_revision(self, proposal_id: str) -> Dict[str, Any]:
+        """GET /api/v1/governance-store/proposals/:id/governed-revision."""
+        return self._get(
+            f"/governance-store/proposals/{proposal_id}/governed-revision"
+        ).data
+
     def governance_history(self, limit: int = 100) -> Dict[str, Any]:
         """GET /api/v1/governance-store/history."""
         return self._get(f"/governance-store/history?limit={limit}").data
