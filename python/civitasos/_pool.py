@@ -176,13 +176,19 @@ class PoolMixin:
     def pool_failures(
         self,
         agent_id: Optional[str] = None,
+        requester_id: Optional[str] = None,
+        relation_id: Optional[str] = None,
         since: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Query the G.1 failure-time index for task failures."""
+        """Query the failure-time index, optionally scoped to a relation pair."""
         query: Dict[str, Any] = {}
         if agent_id:
             query["agent_id"] = agent_id
+        if requester_id:
+            query["requester_id"] = requester_id
+        if relation_id:
+            query["relation_id"] = relation_id
         if since:
             query["since"] = since
         if limit is not None:

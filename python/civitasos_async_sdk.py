@@ -280,12 +280,18 @@ class AsyncCivitasAgent:
     async def pool_failures(
         self,
         agent_id: Optional[str] = None,
+        requester_id: Optional[str] = None,
+        relation_id: Optional[str] = None,
         since: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         query: Dict[str, Any] = {}
         if agent_id:
             query["agent_id"] = agent_id
+        if requester_id:
+            query["requester_id"] = requester_id
+        if relation_id:
+            query["relation_id"] = relation_id
         if since:
             query["since"] = since
         if limit is not None:
