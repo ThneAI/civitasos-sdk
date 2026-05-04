@@ -147,6 +147,7 @@ class GovernanceMixin:
         authority: str = "governance_council",
         source: str = "backend_governance_read_model",
         iem_anchor: Optional[Dict[str, Any]] = None,
+        iem_anchor_replay: Optional[Dict[str, Any]] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -161,6 +162,8 @@ class GovernanceMixin:
         }
         if iem_anchor is not None:
             body["iem_anchor"] = iem_anchor
+        if iem_anchor_replay is not None:
+            body["iem_anchor_replay"] = iem_anchor_replay
         if title:
             body["title"] = title
         if description:
