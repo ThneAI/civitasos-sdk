@@ -22,6 +22,10 @@ from nacl.signing import SigningKey
 from nacl.encoding import HexEncoder
 
 
+class _AuthChallengeUnavailable(CivitasError):
+    """Raised when the backend does not expose server-issued auth challenges."""
+
+
 class CoreMixin:
     """Init, HTTP transport, auth, key management, health checks, multi-node failover."""
 
@@ -48,6 +52,11 @@ class CoreMixin:
         self._public_key_hex: Optional[str] = None
         self._jwt_token: Optional[str] = None
         self._jwt_expires_at: float = 0.0   # unix timestamp
+        self._jwt_auth_context: Dict[str, Any] = {
+            "auth_method": "none",
+            "production_allowed": False,
+            "evidence_allowed": False,
+        }
         # ─── Multi-node state ────────────────────────────────────────
         self._node_index: int = 0
         self._task_handlers: Dict[str, Any] = {}
@@ -155,45 +164,166 @@ class CoreMixin:
         signed = self._signing_key.sign(message)
         return signed.signature.hex()
 
-    def authenticate(self) -> str:
+    @property
+    def jwt_auth_context(self) -> Dict[str, Any]:
+        """Context attached to the current JWT, if known."""
+        return dict(self._jwt_auth_context)
+
+    def authenticate(self, *, allow_legacy_fallback: Optional[bool] = None) -> str:
         """Authenticate with the CivitasOS node and obtain a JWT.
 
         Requires that keys have been generated and the agent has been registered.
+        New backends issue single-use server challenges; older/dev backends may
+        still accept legacy client-generated messages as a compatibility fallback.
         """
         if self._signing_key is None:
             raise CivitasError("No signing key — call generate_keys() or load_keys() first")
         if self._agent_id is None:
             raise CivitasError("No agent registered — call register() first")
 
-        challenge = f"civitasos-auth:{int(time.time())}".encode("utf-8")
-        signature_hex = self.sign(challenge)
-        message_hex = challenge.hex()
+        if allow_legacy_fallback is None:
+            allow_legacy_fallback = os.getenv(
+                "CIVITASOS_AUTH_LEGACY_FALLBACK", "true"
+            ).lower() not in {"0", "false", "no", "off"}
 
-        url = f"{self.base_url}/api/v1/auth/token"
-        body = json.dumps({
-            "agent_id": self._agent_id,
-            "signature": signature_hex,
-            "message": message_hex,
-        }).encode("utf-8")
+        try:
+            return self._authenticate_with_challenge()
+        except _AuthChallengeUnavailable:
+            if not allow_legacy_fallback:
+                raise
+        return self._authenticate_with_legacy_message()
+
+    def authenticate_service_token(
+        self,
+        *,
+        service_id: str,
+        secret: str,
+        scopes: Optional[List[str]] = None,
+    ) -> str:
+        """Obtain a scoped non-production service token.
+
+        Service tokens are intended for controlled operator automation and
+        bootstrap paths only. They do not prove DID key control and must be
+        replaced by DID challenge auth as soon as the agent has a registered DID.
+        """
+        token_body: Dict[str, Any] = {
+            "service_id": service_id,
+            "secret": secret,
+        }
+        if scopes:
+            token_body["scopes"] = scopes
+        url = f"{self.base_url}/api/v1/auth/service-token"
+        body = json.dumps(token_body).encode("utf-8")
         req = Request(url, data=body, method="POST")
         req.add_header("Content-Type", "application/json")
 
         try:
             with urlopen(req, timeout=self.timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                self._jwt_token = data["token"]
-                self._jwt_expires_at = time.time() + data.get("expires_in", 3600)
-                return self._jwt_token
+                raw = json.loads(resp.read().decode("utf-8"))
+                return self._store_auth_token(raw, default_auth_method="service_token")
         except HTTPError as e:
-            try:
-                err = json.loads(e.read().decode("utf-8"))
-                raise CivitasAPIError(err.get("error", str(e)), e.code)
-            except (json.JSONDecodeError, CivitasAPIError):
-                raise
-            except Exception:
-                raise CivitasAPIError(str(e), e.code)
+            self._raise_auth_http_error(e)
         except URLError as e:
             raise CivitasConnectionError(f"Cannot connect to {url}: {e.reason}")
+
+        raise CivitasAPIError("Service-token request failed without response")
+
+    def _authenticate_with_challenge(self) -> str:
+        url = f"{self.base_url}/api/v1/auth/challenge"
+        body = json.dumps({"agent_id": self._agent_id}).encode("utf-8")
+        req = Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as e:
+            if e.code in {404, 405, 501}:
+                raise _AuthChallengeUnavailable(str(e))
+            self._raise_auth_http_error(e)
+        except URLError as e:
+            raise _AuthChallengeUnavailable(f"Cannot connect to {url}: {e.reason}")
+
+        data = raw.get("data", raw) if isinstance(raw, dict) else {}
+        challenge_id = data.get("challenge_id")
+        message_hex = data.get("message")
+        if not challenge_id or not message_hex:
+            raise CivitasAPIError("Auth challenge response missing challenge_id/message")
+
+        signature_hex = self.sign(bytes.fromhex(message_hex))
+        token_body = {
+            "agent_id": self._agent_id,
+            "challenge_id": challenge_id,
+            "signature": signature_hex,
+            "message": message_hex,
+        }
+        return self._request_auth_token(token_body, default_auth_method="did_signature_challenge")
+
+    def _authenticate_with_legacy_message(self) -> str:
+        challenge = f"civitasos-auth:{int(time.time())}".encode("utf-8")
+        signature_hex = self.sign(challenge)
+        message_hex = challenge.hex()
+        token_body = {
+            "agent_id": self._agent_id,
+            "signature": signature_hex,
+            "message": message_hex,
+        }
+        return self._request_auth_token(
+            token_body,
+            default_auth_method="did_signature_legacy_message",
+        )
+
+    def _request_auth_token(
+        self,
+        token_body: Dict[str, Any],
+        *,
+        default_auth_method: str,
+    ) -> str:
+        url = f"{self.base_url}/api/v1/auth/token"
+        body = json.dumps(token_body).encode("utf-8")
+        req = Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+                return self._store_auth_token(raw, default_auth_method=default_auth_method)
+        except HTTPError as e:
+            self._raise_auth_http_error(e)
+        except URLError as e:
+            raise CivitasConnectionError(f"Cannot connect to {url}: {e.reason}")
+
+        raise CivitasAPIError("Auth token request failed without response")
+
+    def _store_auth_token(self, raw: Dict[str, Any], *, default_auth_method: str) -> str:
+        data = raw.get("data", raw) if isinstance(raw, dict) else {}
+        token = data.get("token") or raw.get("token")
+        if not token:
+            raise CivitasAPIError("Auth token response missing token")
+        expires_in = data.get("expires_in") or raw.get("expires_in") or 3600
+        self._jwt_token = token
+        self._jwt_expires_at = time.time() + int(expires_in)
+        self._jwt_auth_context = {
+            "auth_method": data.get("auth_method") or default_auth_method,
+            "production_allowed": bool(data.get("production_allowed", False)),
+            "evidence_allowed": bool(data.get("evidence_allowed", False)),
+        }
+        for key in ("service_id", "scopes", "role", "non_claims"):
+            if key in data:
+                self._jwt_auth_context[key] = data[key]
+        return self._jwt_token
+
+    def _raise_auth_http_error(self, error: HTTPError) -> None:
+        raw = b""
+        try:
+            raw = error.read()
+        except Exception:
+            raise CivitasAPIError(str(error), error.code)
+        try:
+            err = json.loads(raw.decode("utf-8")) if raw else {}
+        except json.JSONDecodeError:
+            raise CivitasAPIError(str(error), error.code)
+        raise CivitasAPIError(err.get("error", str(error)), error.code)
 
     def _ensure_auth(self) -> None:
         """Re-authenticate if JWT is expired or missing."""

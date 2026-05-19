@@ -211,16 +211,16 @@ class PoolMixin:
         Args:
             callback_url: URL to receive webhook POST notifications
             events: List of event types to subscribe to. Defaults to all events.
-                Valid events: task.posted, task.claimed, task.completed,
-                task.failed, task.settled, agent.registered
+                Valid events: task.posted, task.claimed, task.delivered,
+                task.completed, task.failed, task.settled, agent.registered
             agent_id: Agent registering the webhook (defaults to self)
         """
         return self._a2a_request("POST", "/webhooks/register", {
             "agent_id": agent_id or self._agent_id or "anonymous",
             "callback_url": callback_url,
             "events": events or [
-                "task.posted", "task.claimed", "task.completed",
-                "task.failed", "task.settled",
+                "task.posted", "task.claimed", "task.delivered",
+                "task.completed", "task.failed", "task.settled",
             ],
         })
 
