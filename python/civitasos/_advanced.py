@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .models import CivitasError, CspServiceUnavailable
@@ -129,7 +130,11 @@ class AdvancedMixin:
                 body["ttl_secs"] = ttl_secs
             if tags:
                 body["tags"] = tags
-            return self._csp_request("PUT", f"/memory/{aid}/{key}", body)
+            return self._csp_request(
+                "PUT",
+                f"/memory/{quote(str(aid), safe='')}/{quote(key, safe='')}",
+                body,
+            )
         ns_key = f"mem:{aid}:{key}"
         return self._request("PUT", f"/multi/kv/{ns_key}", {"value": value})
 
@@ -141,7 +146,10 @@ class AdvancedMixin:
         aid = getattr(self, '_agent_id', 'anon')
         if self._has_csp("memory"):
             try:
-                result = self._csp_request("GET", f"/memory/{aid}/{key}")
+                result = self._csp_request(
+                    "GET",
+                    f"/memory/{quote(str(aid), safe='')}/{quote(key, safe='')}",
+                )
                 return result.get("value")
             except Exception:
                 return None
@@ -156,7 +164,10 @@ class AdvancedMixin:
         """Delete a value from persistent memory."""
         aid = getattr(self, '_agent_id', 'anon')
         if self._has_csp("memory"):
-            return self._csp_request("DELETE", f"/memory/{aid}/{key}")
+            return self._csp_request(
+                "DELETE",
+                f"/memory/{quote(str(aid), safe='')}/{quote(key, safe='')}",
+            )
         ns_key = f"mem:{aid}:{key}"
         return self._request("DELETE", f"/multi/kv/{ns_key}")
 
