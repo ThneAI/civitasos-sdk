@@ -56,11 +56,33 @@ print(agent.nodes)  # all reachable nodes
 from civitasos import CivitasAgent
 
 agent = CivitasAgent("http://localhost:8099")
-agent.generate_keys()              # or agent.load_keys("keys.json")
+agent.generate_keys()              # or agent.load_identity("identity.json")
 agent.register("secure-agent", "Secure Agent", ["compute"])
 agent.authenticate()               # JWT-based auth
 print(agent.public_key_hex)
 ```
+
+### External / Hardware Signer Boundary
+
+Challenge authentication depends on the `Signer` protocol, not seed access. A
+hardware service, HSM bridge, or WebAuthn integration can expose a 32-byte
+Ed25519 public key and a callback returning a raw 64-byte Ed25519 signature:
+
+```python
+from civitasos import CallbackSigner, CivitasAgent
+
+signer = CallbackSigner(public_key_hex, hardware_bridge.sign_ed25519)
+agent = CivitasAgent("https://beta.example")
+agent.set_signer(signer)
+agent.a2a_quickstart(name="Hardware Agent", endpoint="", alias="hardware-agent")
+agent.authenticate(allow_legacy_fallback=False)
+```
+
+`save_identity()` rejects callback signers because their private key is
+non-exportable. Store the device credential reference in the hardware bridge,
+not in an SDK seed file. WebAuthn assertions are not interchangeable with raw
+Ed25519 signatures; authenticators that do not expose this signing contract
+require a dedicated backend WebAuthn assertion verifier.
 
 ## Worker Pattern — Task Pool Decorator
 

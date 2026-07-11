@@ -18,8 +18,7 @@ from .models import (
 )
 
 # ─── Ed25519 key support (required dependency: PyNaCl) ───────────────
-from nacl.signing import SigningKey
-from nacl.encoding import HexEncoder
+from .signers import Signer, SoftwareEd25519Signer
 
 
 class _AuthChallengeUnavailable(CivitasError):
@@ -49,6 +48,7 @@ class CoreMixin:
         self._agent_id: Optional[str] = None
         # ─── Auth state ──────────────────────────────────────────────
         self._signing_key: Any = None       # nacl.signing.SigningKey
+        self._signer: Optional[Signer] = None
         self._public_key_hex: Optional[str] = None
         self._jwt_token: Optional[str] = None
         self._jwt_expires_at: float = 0.0   # unix timestamp
@@ -137,21 +137,23 @@ class CoreMixin:
 
     def generate_keys(self) -> str:
         """Generate a new Ed25519 key pair. Returns the public key hex."""
-        self._signing_key = SigningKey.generate()
-        self._public_key_hex = self._signing_key.verify_key.encode(
-            encoder=HexEncoder
-        ).decode("ascii")
-        return self._public_key_hex
+        signer = SoftwareEd25519Signer.generate()
+        return self.set_signer(signer)
 
     def load_keys(self, seed_hex: str) -> str:
         """Load an Ed25519 key pair from a 32-byte seed (64 hex chars)."""
-        seed_bytes = bytes.fromhex(seed_hex)
-        if len(seed_bytes) != 32:
-            raise CivitasError(f"Seed must be 32 bytes, got {len(seed_bytes)}")
-        self._signing_key = SigningKey(seed_bytes)
-        self._public_key_hex = self._signing_key.verify_key.encode(
-            encoder=HexEncoder
-        ).decode("ascii")
+        signer = SoftwareEd25519Signer.from_seed_hex(seed_hex)
+        return self.set_signer(signer)
+
+    def set_signer(self, signer: Signer) -> str:
+        """Attach a software or non-exportable Ed25519 signer."""
+        if not isinstance(signer, Signer):
+            raise CivitasError("Signer must provide public_key_hex and sign(message)")
+        self._signer = signer
+        self._public_key_hex = signer.public_key_hex
+        self._signing_key = (
+            signer.signing_key if isinstance(signer, SoftwareEd25519Signer) else None
+        )
         return self._public_key_hex
 
     def sign(self, message: bytes) -> str:
@@ -159,10 +161,9 @@ class CoreMixin:
 
         Returns hex-encoded 64-byte Ed25519 signature.
         """
-        if self._signing_key is None:
+        if self._signer is None:
             raise CivitasError("No signing key — call generate_keys() or load_keys() first")
-        signed = self._signing_key.sign(message)
-        return signed.signature.hex()
+        return self._signer.sign(message).hex()
 
     @property
     def jwt_auth_context(self) -> Dict[str, Any]:
@@ -176,7 +177,7 @@ class CoreMixin:
         New backends issue single-use server challenges; older/dev backends may
         still accept legacy client-generated messages as a compatibility fallback.
         """
-        if self._signing_key is None:
+        if self._signer is None:
             raise CivitasError("No signing key — call generate_keys() or load_keys() first")
         if self._agent_id is None:
             raise CivitasError("No agent registered — call register() first")
@@ -340,9 +341,13 @@ class CoreMixin:
         The file is created with mode 0600 (owner read/write only).
         Raises CivitasError if no signing key has been generated.
         """
-        if self._signing_key is None:
+        if self._signer is None:
             raise CivitasError("No signing key — call generate_keys() or load_keys() first")
-        seed_hex = bytes(self._signing_key._seed).hex()  # type: ignore[attr-defined]
+        if not isinstance(self._signer, SoftwareEd25519Signer):
+            raise CivitasError(
+                "Attached signer is non-exportable; persist its hardware/WebAuthn credential reference instead"
+            )
+        seed_hex = self._signer.export_seed_hex()
         data = {
             "seed_hex": seed_hex,
             "public_key_hex": self._public_key_hex,
