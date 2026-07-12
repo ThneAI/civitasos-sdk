@@ -20,6 +20,7 @@ dependencies = ["PyNaCl>=1.5.0"]
 
 [project.optional-dependencies]
 async = ["aiohttp>=3.9.0"]
+hardware = ["python-pkcs11>=0.7.0"]
 
 [project.scripts]
 civitasos = "civitasos_cli:main"

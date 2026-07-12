@@ -32,7 +32,7 @@ from ._a2a import A2AMixin
 from ._pool import PoolMixin
 from ._r2r import R2RMixin
 from ._advanced import AdvancedMixin
-from .signers import CallbackSigner, Signer, SoftwareEd25519Signer
+from .signers import CallbackSigner, Pkcs11Ed25519Signer, Signer, SoftwareEd25519Signer
 
 
 class CivitasAgent(
@@ -73,4 +73,5 @@ __all__ = [
     "Signer",
     "SoftwareEd25519Signer",
     "CallbackSigner",
+    "Pkcs11Ed25519Signer",
 ]
