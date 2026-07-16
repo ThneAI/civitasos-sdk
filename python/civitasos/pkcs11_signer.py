@@ -24,6 +24,8 @@ class Pkcs11Ed25519Signer:
         if not module_path or not token_label or not key_label:
             raise CivitasError("PKCS#11 module, token label, and key label are required")
         normalized_key_id = self._normalize_key_id(key_id)
+        if normalized_key_id is None:
+            raise CivitasError("PKCS#11 key ID is required for unambiguous selection")
         if pkcs11_module is None:
             try:
                 import pkcs11 as pkcs11_module
@@ -35,13 +37,17 @@ class Pkcs11Ed25519Signer:
         self._lock = RLock()
         self._session = None
         self._private_key = None
+        self._module_path = module_path
+        self._token_label = token_label
+        self._key_label = key_label
+        self._key_id = normalized_key_id
         try:
             library = pkcs11_module.lib(module_path)
             token = library.get_token(token_label=token_label)
             self._session = token.open(user_pin=user_pin)
             selector = {
                 "label": key_label,
-                **({"id": normalized_key_id} if normalized_key_id is not None else {}),
+                "id": normalized_key_id,
             }
             self._private_key = self._session.get_key(
                 object_class=pkcs11_module.ObjectClass.PRIVATE_KEY,
@@ -106,6 +112,21 @@ class Pkcs11Ed25519Signer:
     @property
     def public_key_hex(self) -> str:
         return self._public_key_hex
+
+    @property
+    def key_reference(self) -> dict[str, str | None]:
+        """Return the non-secret PKCS#11 inventory reference for this signer."""
+        return {
+            "provider": "pkcs11",
+            "module_path": self._module_path,
+            "token_label": self._token_label,
+            "key_label": self._key_label,
+            "key_id_hex": self._key_id.hex() if self._key_id is not None else None,
+        }
+
+    @property
+    def private_key_exportable(self) -> bool:
+        return False
 
     def sign(self, message: bytes) -> bytes:
         if not isinstance(message, bytes):

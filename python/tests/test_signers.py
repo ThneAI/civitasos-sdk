@@ -105,6 +105,14 @@ def test_pkcs11_ed25519_signer_uses_private_key_and_eddsa_mechanism():
         pkcs11_module=FakePkcs11,
     ) as signer:
         assert signer.public_key_hex == public_key.hex()
+        assert signer.key_reference == {
+            "provider": "pkcs11",
+            "module_path": "/opt/token.so",
+            "token_label": "civitas-token",
+            "key_label": "agent-key",
+            "key_id_hex": "01ab",
+        }
+        assert signer.private_key_exportable is False
         assert signer.sign(b"challenge") == b"s" * 64
 
     signer.close()
@@ -161,7 +169,37 @@ def test_pkcs11_ed25519_signer_rejects_mismatched_public_key_and_closes_session(
             "agent-key",
             "cd" * 32,
             "1234",
+            key_id="01",
             pkcs11_module=FakePkcs11,
         )
 
     assert closed is True
+
+
+def test_pkcs11_signer_requires_key_id_before_loading_module():
+    with pytest.raises(CivitasError, match="key ID is required"):
+        Pkcs11Ed25519Signer(
+            "/missing/module.so",
+            "civitas-token",
+            "agent-key",
+            None,
+            "1234",
+        )
+
+
+def test_agent_never_falls_back_to_software_when_hardware_signing_fails():
+    class FailingHardwareSigner:
+        public_key_hex = "ab" * 32
+        private_key_exportable = False
+
+        @staticmethod
+        def sign(_message: bytes) -> bytes:
+            raise CivitasError("hardware token unavailable")
+
+    agent = CivitasAgent(auto_discover=False)
+    agent.set_signer(FailingHardwareSigner())
+
+    with pytest.raises(CivitasError, match="hardware token unavailable"):
+        agent.sign(b"challenge")
+    assert agent._signing_key is None
+    assert agent._signer.__class__ is FailingHardwareSigner
