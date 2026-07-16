@@ -9,6 +9,7 @@ from nacl.encoding import HexEncoder
 from nacl.signing import SigningKey
 
 from .models import CivitasError
+from .pkcs11_signer import Pkcs11Ed25519Signer as Pkcs11Ed25519Signer
 
 
 @runtime_checkable
@@ -85,73 +86,3 @@ class CallbackSigner:
             length = len(signature) if isinstance(signature, bytes) else "non-bytes"
             raise CivitasError(f"Signer callback must return a 64-byte Ed25519 signature, got {length}")
         return signature
-
-
-class Pkcs11Ed25519Signer:
-    """Ed25519 signer backed by a non-exportable PKCS#11 private key."""
-
-    def __init__(
-        self,
-        module_path: str,
-        token_label: str,
-        key_label: str,
-        public_key_hex: str,
-        user_pin: str | None = None,
-        *,
-        pkcs11_module=None,
-    ):
-        try:
-            public_key = bytes.fromhex(public_key_hex)
-        except ValueError as error:
-            raise CivitasError("PKCS#11 public key must be valid hex") from error
-        if len(public_key) != 32:
-            raise CivitasError("PKCS#11 Ed25519 public key must be 32 bytes")
-        if not module_path or not token_label or not key_label:
-            raise CivitasError("PKCS#11 module, token label, and key label are required")
-        if pkcs11_module is None:
-            try:
-                import pkcs11 as pkcs11_module
-            except ImportError as error:
-                raise CivitasError(
-                    "Pkcs11Ed25519Signer requires the 'hardware' SDK extra"
-                ) from error
-        self._public_key_hex = public_key_hex.lower()
-        self._pkcs11 = pkcs11_module
-        try:
-            library = pkcs11_module.lib(module_path)
-            token = library.get_token(token_label=token_label)
-            self._session = token.open(user_pin=user_pin)
-            self._private_key = self._session.get_key(
-                object_class=pkcs11_module.ObjectClass.PRIVATE_KEY,
-                label=key_label,
-            )
-        except Exception as error:
-            raise CivitasError(f"PKCS#11 key initialization failed: {error}") from error
-
-    @property
-    def public_key_hex(self) -> str:
-        return self._public_key_hex
-
-    def sign(self, message: bytes) -> bytes:
-        if not isinstance(message, bytes):
-            raise CivitasError("PKCS#11 signer message must be bytes")
-        try:
-            signature = bytes(
-                self._private_key.sign(message, mechanism=self._pkcs11.Mechanism.EDDSA)
-            )
-        except Exception as error:
-            raise CivitasError(f"PKCS#11 Ed25519 signing failed: {error}") from error
-        if len(signature) != 64:
-            raise CivitasError(
-                f"PKCS#11 Ed25519 signature must be 64 bytes, got {len(signature)}"
-            )
-        return signature
-
-    def close(self) -> None:
-        self._session.close()
-
-    def __enter__(self) -> "Pkcs11Ed25519Signer":
-        return self
-
-    def __exit__(self, *_args) -> None:
-        self.close()

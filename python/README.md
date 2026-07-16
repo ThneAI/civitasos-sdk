@@ -84,6 +84,32 @@ not in an SDK seed file. WebAuthn assertions are not interchangeable with raw
 Ed25519 signatures; authenticators that do not expose this signing contract
 require a dedicated backend WebAuthn assertion verifier.
 
+For PKCS#11 tokens that expose an Ed25519 key pair, use the concrete provider.
+The SDK resolves the public key from the token, selects both objects by label
+and optional CKA_ID, serializes access to the PKCS#11 session, and rejects a
+caller-supplied public key that does not match the selected token object:
+
+```python
+from getpass import getpass
+
+from civitasos import CivitasAgent, Pkcs11Ed25519Signer
+
+with Pkcs11Ed25519Signer(
+    "/usr/lib/softhsm/libsofthsm2.so",
+    token_label="civitas-service",
+    key_label="agent-signing-2026q3",
+    key_id="01",
+    user_pin=getpass("Token PIN: "),
+) as signer:
+    agent = CivitasAgent("https://beta.example")
+    agent.set_signer(signer)
+    agent.authenticate(allow_legacy_fallback=False)
+```
+
+Do not place a token PIN in source, command arguments, or committed environment
+files. SoftHSM validates integration behavior only; it is not physical-HSM
+security evidence.
+
 ## Worker Pattern — Task Pool Decorator
 
 ```python

@@ -49,16 +49,22 @@ def test_software_signer_seed_round_trip():
 
 def test_pkcs11_ed25519_signer_uses_private_key_and_eddsa_mechanism():
     calls = {}
+    public_key = bytes.fromhex("ab" * 32)
 
     class PrivateKey:
         def sign(self, message, *, mechanism):
             calls["sign"] = (message, mechanism)
             return b"s" * 64
 
+    class PublicKey:
+        def __getitem__(self, attribute):
+            assert attribute == "ec_point"
+            return b"\x04\x20" + public_key
+
     class Session:
         def get_key(self, **kwargs):
-            calls["get_key"] = kwargs
-            return PrivateKey()
+            calls.setdefault("get_key", []).append(kwargs)
+            return PrivateKey() if kwargs["object_class"] == "private" else PublicKey()
 
         def close(self):
             calls["closed"] = True
@@ -76,6 +82,10 @@ def test_pkcs11_ed25519_signer_uses_private_key_and_eddsa_mechanism():
     class FakePkcs11:
         class ObjectClass:
             PRIVATE_KEY = "private"
+            PUBLIC_KEY = "public"
+
+        class Attribute:
+            EC_POINT = "ec_point"
 
         class Mechanism:
             EDDSA = "eddsa"
@@ -89,12 +99,69 @@ def test_pkcs11_ed25519_signer_uses_private_key_and_eddsa_mechanism():
         "/opt/token.so",
         "civitas-token",
         "agent-key",
-        "ab" * 32,
+        None,
         "1234",
+        key_id="01ab",
         pkcs11_module=FakePkcs11,
     ) as signer:
+        assert signer.public_key_hex == public_key.hex()
         assert signer.sign(b"challenge") == b"s" * 64
 
-    assert calls["get_key"] == {"object_class": "private", "label": "agent-key"}
+    signer.close()
+    with pytest.raises(CivitasError, match="closed"):
+        signer.sign(b"challenge")
+
+    assert calls["get_key"] == [
+        {"object_class": "private", "label": "agent-key", "id": b"\x01\xab"},
+        {"object_class": "public", "label": "agent-key", "id": b"\x01\xab"},
+    ]
     assert calls["sign"] == (b"challenge", "eddsa")
     assert calls["closed"] is True
+
+
+def test_pkcs11_ed25519_signer_rejects_mismatched_public_key_and_closes_session():
+    closed = False
+
+    class Key:
+        def __getitem__(self, _attribute):
+            return b"\x04\x20" + bytes.fromhex("ab" * 32)
+
+    class Session:
+        def get_key(self, **_kwargs):
+            return Key()
+
+        def close(self):
+            nonlocal closed
+            closed = True
+
+    class Token:
+        def open(self, **_kwargs):
+            return Session()
+
+    class Library:
+        def get_token(self, **_kwargs):
+            return Token()
+
+    class FakePkcs11:
+        class ObjectClass:
+            PRIVATE_KEY = "private"
+            PUBLIC_KEY = "public"
+
+        class Attribute:
+            EC_POINT = "ec_point"
+
+        @staticmethod
+        def lib(_path):
+            return Library()
+
+    with pytest.raises(CivitasError, match="does not match"):
+        Pkcs11Ed25519Signer(
+            "/opt/token.so",
+            "civitas-token",
+            "agent-key",
+            "cd" * 32,
+            "1234",
+            pkcs11_module=FakePkcs11,
+        )
+
+    assert closed is True
